@@ -1,7 +1,0 @@
-"0","#| fig-width: 8"
-"0","#| fig-height: 5"
-"0",""
-"0","raw |> filter(.feature %in% ""Hu IL-7 (74)"") |> "
-"0","  plot_standard_curves() + facet_wrap(. ~ plate_name + .feature) + guides(col = ""none"") +"
-"0","  ggtitle(""Standard curves for Hu IL-7 (74)"")"
-"0",""

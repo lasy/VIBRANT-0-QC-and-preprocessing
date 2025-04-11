@@ -1,5 +1,0 @@
-"0","#| fig-height: 3"
-"0","#| fig-width: 9"
-"0",""
-"0","factoextra::fviz_eig(pca_res, ncp = 48)"
-"0",""

@@ -1,7 +1,0 @@
-"0",""
-"0","ranges <- "
-"0","  raw@metadata$ranges |> "
-"0","  pivot_longer(c(""LLOQ"", ""ULOQ"", ""mid""), names_to = ""value_type"", values_to = ""concentration"") |>"
-"0","  mutate(value_type = value_type |> factor(levels = c(""LLOQ"", ""mid"", ""ULOQ""))) |>"
-"0","  arrange(plate_nb, value_type) "
-"0",""
