@@ -1,0 +1,4 @@
+"0",""
+"0","pca_res <- "
+"0","  prcomp(complete |> assay(""conc_log2_imputed"") |> t(), center = TRUE, scale = TRUE)"
+"0",""

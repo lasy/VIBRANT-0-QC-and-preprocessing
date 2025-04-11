@@ -1,0 +1,7 @@
+"0",""
+"0","samples_to_rerun |> "
+"0","  ggplot() +"
+"0","  aes(x = plate_row, y = plate_col, fill = reason) +"
+"0","  geom_tile() +"
+"0","  facet_wrap(. ~ plate_nb) "
+"0",""

@@ -1,0 +1,5 @@
+"0",""
+"0","mod2 <- lm(volume ~ weight + I(weight^2), data = dilution_related_data |> filter(location == ""US""))"
+"0","pred_volume <- predict(mod2, newdata = tibble(weight = raw$weight))"
+"0","raw$volume_imputed <- ifelse((raw$location == ""SA"") & (raw$sample_type == ""Sample""), pred_volume, raw$volume)"
+"0",""

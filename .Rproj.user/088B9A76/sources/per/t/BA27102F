@@ -1,0 +1,27 @@
+{
+    "id": "BA27102F",
+    "path": "~/Documents/Work/Academia/Research/Projects/01. VIBRANT/VIBRANT-QC-and-preprocessing/R scripts/get_simulated_data_dir.R",
+    "project_path": "R scripts/get_simulated_data_dir.R",
+    "type": "r_source",
+    "hash": "3687285361",
+    "contents": "",
+    "dirty": false,
+    "created": 1743077720833.0,
+    "source_on_save": true,
+    "relative_order": 11,
+    "properties": {
+        "tempName": "Untitled1",
+        "source_window_id": "",
+        "Source": "Source",
+        "cursorPosition": "13,0",
+        "scrollLine": "0"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1743077742,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1743077742228,
+    "read_only": false,
+    "read_only_alternatives": []
+}

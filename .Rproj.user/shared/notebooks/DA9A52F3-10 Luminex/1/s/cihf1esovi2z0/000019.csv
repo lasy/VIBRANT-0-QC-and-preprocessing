@@ -1,0 +1,8 @@
+"0","#| fig-width: 10"
+"0","#| fig-height: 8"
+"0",""
+"0","check_transformation(raw, transf = ""none"") +"
+"0","check_transformation(raw, transf = ""asinh"") +"
+"0","check_transformation(raw, transf = ""log"") +"
+"0","check_transformation(raw, transf = ""sqrt"")"
+"0",""

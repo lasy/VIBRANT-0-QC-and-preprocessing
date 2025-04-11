@@ -1,0 +1,7 @@
+"0",""
+"0","manifest <- "
+"0","  read_xlsx("
+"0","    str_c(luminex_dir, ""/Plate Layouts.xlsx""), "
+"0","    sheet = ""Plating"", range = ""A2:X372"""
+"0","  )"
+"2","New names:"

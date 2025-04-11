@@ -1,0 +1,10 @@
+"0",""
+"0","raw <- impute_OOR(raw)"
+"1","VIBRANT batch 1
+	Added 2 assays:
+		-`conc` with the imputed concentrations
+		-`value_type` with the type of value (observed, extrapolated, below LLOQ, above ULOQ)
+	and 2 elements to @metadata:
+		-`ranges` with ULOQ and LLOQ values for each analyte and plate
+		-`standards` with additional information on each standard samples (useful for diagnostic plots)
+"
