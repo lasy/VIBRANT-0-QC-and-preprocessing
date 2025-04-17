@@ -1,0 +1,272 @@
+---
+title: "99 Purgatory"
+format: html
+editor: visual
+---
+
+## Import data 
+
+```{r}
+
+
+simulated <- FALSE
+
+if (simulated == TRUE) {
+  simulated_data_dir <- get_simulated_data_dir()
+  mg_dir <- str_c(simulated_data_dir, "03 metagenomics combined/")
+  counts <- read_csv(str_c(mg_dir, "mg_combined.csv"))
+  manifest <- read_csv(str_c(mg_dir, "mg_combined_manifest.csv"))
+} else {
+  VIBRANT_dropbox <- get_VIBRANT_Dropbox_dir()
+  mg_dir <- str_c(VIBRANT_dropbox, "13_VIBRANT Metagenomics/")
+  mg_dir <- fs::dir_ls(mg_dir) |> sort(decreasing = TRUE) |> magrittr::extract(1) |> str_c("/")
+  
+  counts <- read_csv(str_c(mg_dir, "MVIBR_kSanityVIRGO2_ReadCounts_20250404.csv"))
+  counts_corr <- read_csv(str_c(mg_dir, "MVIBR_kSanityVIRGO2_taxaGLcor_20250404.csv"))
+  relabs <- read_csv(str_c(mg_dir, "MVIBR_kSanityVIRGO2_RelAbund_20250404.csv"))
+  technical_metadata <- read_csv(str_c(mg_dir, "VIBRANT_MG_technicalMetaData_20250404.csv"))
+  LBP_strain_info <- readxl::read_xlsx(str_c(VIBRANT_dropbox, "IsolateNumbers copy.xlsx"))
+}
+
+```
+
+## Make SE
+
+```{r}
+
+mg_to_SE <- function(counts, mg_combined, mg_manifest, LBP_strain_info){
+  mg_manifest <- 
+    mg_manifest |> 
+    mutate(sample_id = str_c(pid, "_", visit_code)) 
+  
+  if (any(duplicated(mg_manifest$sample_id))) stop("Duplicated `uid` in `mg_manifest`")
+  
+  # mg <- mg |> filter(!is.na(`Lactobacillus crispatus`))
+  counts <- counts |> left_join(mg_manifest, by = join_by(barcode))
+  tmp <- counts |> dplyr::select(barcode, sample_id) |> distinct()
+  if (any(duplicated(tmp$sample_id))) stop("Duplicated `uid` in `mg`")
+  
+  assay_counts <- 
+    counts |> 
+    dplyr::select(sample_id, everything()) |> 
+    dplyr::select(-c(pid, visit_code, barcode, total_reads)) |> 
+    as.data.frame() |> 
+    column_to_rownames("sample_id") |> 
+    drop_na() |> 
+    t() 
+  
+  ## Checking if total_reads match the sum accross taxa
+  tibble(
+    sample_id = colnames(assay_counts),
+    sum_counts = colSums(assay_counts)
+  ) |> 
+    left_join(
+      counts |> select(sample_id, total_reads),
+      by = join_by(sample_id)
+    ) |> 
+    ggplot() +
+    aes(x = sum_counts, y = total_reads) +
+    geom_abline(slope = 1, intercept = 0, col = "steelblue1") +
+    geom_point(alpha = 0.5, size = 0.3)
+    
+  assay_prop_of_Lc <- 
+    (t(assay_counts)/colSums(assay_counts)) |> 
+    t()
+ 
+  se_coldata <-
+    tibble(
+      sample_id = colnames(assay_counts),
+      sum_counts = colSums(assay_counts)
+    ) |> 
+    left_join(
+      counts |> select(sample_id, barcode, total_reads), by = join_by(sample_id)
+      ) |> 
+    select(barcode, everything()) |> 
+    as.data.frame() |> 
+    column_to_rownames("sample_id")
+
+  se_rowdata <- 
+    mg |> 
+    dplyr::select(-c(barcode, pid, visit_code, sample_id)) |> 
+    colnames() |> 
+    as.data.frame() |> 
+    setNames("strain") |> 
+    distinct() |> 
+    left_join(
+      LBP_strain_info,
+      by = join_by(strain == strain_id)
+    ) 
+  
+  
+  # Harmonization of the order of samples and feature
+  
+  sorted_sample_ids <- sort(as.character(se_coldata$sample_id))
+  assay_prop_of_Lc <- assay_prop_of_Lc[, sorted_sample_ids]
+  assay_unique_kmers <- assay_unique_kmers[, sorted_sample_ids]
+  se_coldata <- se_coldata[match(sorted_sample_ids, se_coldata$sample_id), ]
+
+  sorted_strains <- assay_prop_of_Lc |> rownames() # sort(as.character(se_rowdata$strain))
+  assay_prop_of_Lc <- assay_prop_of_Lc[sorted_strains, ]
+  assay_unique_kmers <- assay_unique_kmers[sorted_strains, ]
+  se_rowdata <- se_rowdata[match(sorted_strains, se_rowdata$strain), ]
+
+  se_rowdata <- as(se_rowdata, "DataFrame")
+  se_coldata <- as(se_coldata, "DataFrame")
+
+  SummarizedExperiment::SummarizedExperiment(
+    assays = list(prop_of_Lc = assay_prop_of_Lc, unique_kmers = assay_unique_kmers),
+    rowData = se_rowdata,
+    colData = se_coldata
+  )
+}
+
+```
+
+
+## QC
+
+transforming in long 
+
+```{r}
+counts_long <- 
+  counts |> 
+  dplyr::select(-c(CST, subCST, score)) |>
+  pivot_longer(-c(sampleID), names_to = "taxon", values_to = "readcounts")
+
+counts_corr_long <- 
+  counts_corr |> 
+  dplyr::select(-c(CST, subCST, score)) |>
+  pivot_longer(-c(sampleID), names_to = "taxon", values_to = "readcounts")
+
+relabs_long <- 
+  relabs |> 
+  dplyr::select(-c(CST, subCST, score)) |>
+  pivot_longer(-c(sampleID), names_to = "taxon", values_to = "relab")
+```
+
+
+total number of reads 
+
+```{r}
+
+counts_long |>
+  group_by(sampleID) |>
+  summarise(total_count = sum(readcounts)) |>
+  ggplot(aes(x = total_count)) +
+  geom_histogram() +
+  scale_x_log10() +
+  labs(x = "Total number of counts per sample",
+       y = "Number of samples")
+
+counts_corr_long |>
+  group_by(sampleID) |>
+  summarise(total_count = sum(readcounts)) |>
+  ggplot(aes(x = total_count)) +
+  geom_histogram() +
+  scale_x_log10() +
+  labs(x = "Total number of corrected counts per sample",
+       y = "Number of samples")
+
+
+```
+
+## coocurrence
+
+```{r}
+
+
+
+presence_absence <- relabs_long |>
+  filter(taxon %in% LBP_strain_info$strain_id) |>
+  pivot_wider(names_from = taxon, values_from = relab, values_fill = 0) |>
+  mutate(across(where(is.numeric), ~ ifelse(. > 0, 1, 0))) |> # 1 si present, 0 si absent.
+  select(-sampleID)
+
+cooccurrence <- presence_absence |>
+  summarise(across(everything(), sum)) |>
+  pivot_longer(cols = everything(), names_to = "taxon", values_to = "presence_count")
+
+cooccurrence_matrix <- presence_absence |>
+  summarise(across(everything(), list)) |>
+  pivot_longer(cols = everything(), names_to = "taxon", values_to = "presence_list") |>
+  mutate(presence_list = map(presence_list, unlist)) |>
+  pull(presence_list)
+
+cooccur_mat = matrix(0, nrow = length(cooccurrence_matrix), ncol = length(cooccurrence_matrix))
+rownames(cooccur_mat) = colnames(presence_absence)
+colnames(cooccur_mat) = colnames(presence_absence)
+
+for (i in 1:length(cooccurrence_matrix)){
+  for (j in 1:length(cooccurrence_matrix)){
+    cooccur_mat[i,j] = sum(cooccurrence_matrix[[i]] & cooccurrence_matrix[[j]])
+  }
+}
+
+exclusive_strains <- data.frame(cooccur_mat) |>
+  mutate(strain = rownames(cooccur_mat)) |>
+  pivot_longer(!strain, names_to = "other_strain", values_to = "cooccur") |>
+  group_by(strain) |>
+  summarise(total_cooccur = sum(cooccur)) |>
+  filter(total_cooccur == 0)
+
+print(exclusive_strains)
+
+cooccur_melted = data.frame(cooccur_mat) |>
+  mutate(strain = rownames(cooccur_mat)) |>
+  pivot_longer(!strain, names_to = "other_strain", values_to = "cooccur")
+
+ggplot(cooccur_melted, aes(x = strain, y = other_strain, fill = cooccur)) +
+  geom_tile() +
+  scale_fill_continuous(low = "white", high = "steelblue2") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+
+## Plot
+
+```{r}
+
+technical_metadata |> 
+  ggplot(aes(x = Ext_Lib_Plate |> as.factor(), fill = Lane |> as.factor())) +
+  geom_bar(position = "stack") + 
+  theme_bw() + 
+  scale_fill_manual(values = brewer.pal(n = length(unique(technical_metadata$Lane)), name = "Set3"))
+
+technical_metadata |> 
+  ggplot(aes(x = Ext_Lib_Plate |> as.factor(), fill = Ext_Lib_Plate_ID |> as.factor())) +
+  geom_bar(position = "stack") + 
+  theme_bw() + 
+  scale_fill_manual(values = brewer.pal(n = length(unique(technical_metadata$Ext_Lib_Plate_ID)), name = "Set3"))
+
+technical_metadata |> 
+  ggplot(aes(x = Ext_Lib_Plate |> as.factor(), fill = DateSequenced |> as.factor())) +
+  geom_bar(position = "stack") + 
+  theme_bw() + 
+  scale_fill_manual(values = brewer.pal(n = length(unique(technical_metadata$DateSequenced)), name = "Set3"))
+
+technical_metadata |> 
+  ggplot(aes(x = `Library Pool` |> as.factor(), fill = Ext_Lib_Plate |> as.factor())) +
+  geom_bar(position = "stack") + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  scale_fill_manual(values = brewer.pal(n = length(unique(technical_metadata$Ext_Lib_Plate)), name = "Set3"))
+
+
+technical_metadata |> 
+  ggplot(aes(x = Ext_Lib_Plate |> as.factor(), fill = BioinformaticsProcessingBatch |> as.factor())) +
+  geom_bar(position = "stack") + 
+  theme_bw() + 
+  scale_fill_manual(values = brewer.pal(n = length(unique(technical_metadata$BioinformaticsProcessingBatch)), name = "Set3"))
+
+```
+
+
+## PCOA
+
+```{r}
+dist_matrix <-
+  vegdist(
+    counts |> dplyr::select(-c(CST, subCST, score)) |> column_to_rownames("sampleID"),
+    method = "bray")
+```
+

@@ -2,7 +2,10 @@ get_VIBRANT_Dropbox_dir <- function(){
   
   if(str_detect(getwd(), "laurasymul")){
     dir <- "/Users/laurasymul/Dropbox/Academia/Projects/VIBRANT Study Files/"
-  } else {
+  } 
+  else if (str_detect(getwd(), "vermeren"))
+    dir <- "/Users/lvermeren/Dropbox/VIBRANT Study Files/"
+  else {
     stop(
       "
       Hello new script runner!\t

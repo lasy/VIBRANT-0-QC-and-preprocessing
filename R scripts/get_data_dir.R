@@ -1,0 +1,21 @@
+get_data_dir <- function(data_source = "simulated"){
+  
+  if (str_detect(getwd(), "laurasymul"))
+    data_dir <- "/Users/laurasymul/OneDrive - UCL/Academia/Research/VIBRANT data UCLouvain/"
+  else if (str_detect(getwd(), "vermeren"))
+    data_dir <- "/Users/lvermeren/OneDrive - UCL/VIBRANT data UCLouvain/"
+  else
+    stop("You need to specify the path to the data directory in `R/data_dir.R`")
+  
+  if (data_source == "simulated"){
+    data_dir <- str_c(data_dir, "simulated data/")
+    data_dir <- fs::dir_ls(data_dir) |> sort(decreasing = TRUE) |> magrittr::extract(1) |> str_c("/")
+  }
+  else if (data_source == "real")
+    data_dir <- str_c(data_dir, "actual data/00 Raw/")
+  else
+    stop("data_source must be either 'simulated' or 'real'")
+  
+  data_dir
+}
+
