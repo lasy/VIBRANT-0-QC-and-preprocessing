@@ -20,6 +20,7 @@ GenomeInfoDb
 GenomicRanges
 Biobase
 SummarizedExperiment
+ttservice
 tidySummarizedExperiment
 labelled
 permute

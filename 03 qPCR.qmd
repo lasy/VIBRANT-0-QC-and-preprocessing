@@ -1,0 +1,971 @@
+---
+title: "qPCR data QC"
+author: Laura Vermeren & Symul
+date: today
+format: 
+   html:
+     page-layout: full
+     code-fold: true
+     toc: true
+     toc-location: left
+     toc-depth: 5
+     embed-resources: true
+execute:
+  cache: refresh # true refresh false
+  warning: false
+knitr:
+  opts_chunk:
+    out.width: "100%"
+editor: source
+---
+
+
+```{r}
+#| warning: false
+
+library(tidyverse)
+library(magrittr)
+library(gt)
+library(patchwork)
+library(SummarizedExperiment)
+library(tidySummarizedExperiment)
+
+tmp <- fs::dir_map("R scripts/", source)
+
+theme_set(theme_light())
+
+```
+
+## Loading the data
+
+
+```{r}
+
+data_source <- "real"
+qpcr_dir <- str_c(get_data_dir(data_source), "00 Raw/03 qPCR/")
+file <- "VIBRANT_qPCR_data_merged_250416.csv"
+cat("We load the file", file, "\n\n")
+qpcr <- read_csv(str_c(qpcr_dir, file))
+
+```
+
+
+The data is provided in long format:
+
+```{r}
+
+qpcr |> glimpse()
+
+```
+
+
+- `Data_row` is the row number
+- `Well` is the well number from `r min(qpcr$Well)` to `r max(qpcr$Well)`
+- `Fluor` is the fluorescent dye used (`r qpcr$Fluor |> unique() |> str_c(collapse = ", ")`)
+- `Content` ???
+- `Replicate` is the replicate number from `r min(qpcr$Replicate, na.rm = TRUE)` to `r max(qpcr$Replicate, na.rm = TRUE)` (with `r sum(is.na(qpcr$Replicate))` missing values). Values are repeated 495, or 990 times
+
+> TODO: check what that is exactly
+
+- `Sample` is a sample ID --- ?
+
+- `Cq` is the quantification cycle (Cq) value.
+- `Starting Quantity (SQ)` is ???
+- `Cq Mean` is the mean Cq value for the replicate ???
+
+> TODO: check what that is exactly
+
+- `plate_id` is the qPCR plate ID; there are `r qpcr$plate_id |> unique() |> length()` unique plate IDs in total.
+
+- `Plate_number` is the **extraction** plate number; there are `r qpcr$Plate_number |> unique() |> length()` unique plate numbers in total (5 `plate_id` per `Plate_number`).
+
+- `gDNA_Plate_ID` is the gDNA plate ID; there are `r qpcr$gDNA_Plate_ID |> unique() |> length()` unique gDNA plate IDs in total (match the `Plate_number`).
+
+- `VMRC_Group` is the VMRC group; there are `r qpcr$VMRC_Group |> unique() |> length()` unique VMRC groups in total (`r qpcr$VMRC_Group |> unique()  |> sort() |> str_c(collapse = ", ")`).
+
+- `Group_Fluor` combines the `Fluor` and `VMRC_Group` columns
+
+- `Target` is the target "gene" (taxa/strain); there are `r qpcr$Target |> unique() |> length()` unique targets in total (`r qpcr$Target |> unique()  |> sort() |> str_c(collapse = ", ")`).
+
+
+```{r}
+
+qpcr |> 
+  dplyr::count(Fluor, VMRC_Group, Group_Fluor, Target)
+
+```
+
+For now, we only have data for the 15 LBP strains.
+
+- `gDNA_Plate_Well` is the gDNA plate well; there are `r qpcr$gDNA_Plate_Well |> unique() |> length()` unique gDNA plate wells in total in the format `[gDNA_Plate_ID]_[Well]` (*e.g.*, `r qpcr$gDNA_Plate_Well[10]`).
+
+- `VIBR_Sample_ID` is the VIBRANT sample ID; there are `r qpcr$VIBR_Sample_ID |> unique() |> length()` unique VIBRANT sample IDs in total.
+
+- `Dilution_Factor` is the dilution factor; there are `r qpcr$Dilution_Factor |> unique() |> length()` unique dilution factors in total (`r qpcr$Dilution_Factor |> unique()  |> sort() |> str_c(collapse = ", ")`).
+
+- `Quant_Adjusted` is the adjusted quantification value; they range from `r min(qpcr$Quant_Adjusted)` to `r max(qpcr$Quant_Adjusted)`.
+
+- `Copies_per_swab` is the number of copies per swab; they range from `r min(qpcr$Copies_per_swab)` to `r max(qpcr$Copies_per_swab)`.
+
+### Tidy names
+
+We tidy the column names for consistency and readability.
+
+```{r}
+
+qpcr <- qpcr |> janitor::clean_names()
+colnames(qpcr)
+```
+
+
+### Sample types and unique sample IDs
+
+We define a `sample_type` variable to summarize information from `vibr_sample_id` and `sample` columns.
+
+```{r}
+
+qpcr <-  
+  qpcr |> 
+  mutate(
+    sample_type = 
+      case_when(
+        str_detect(vibr_sample_id, "#N/A") & str_detect(sample, "std") ~ "Standard",
+        str_detect(vibr_sample_id, "#N/A") & str_detect(sample, "water") ~ "Water",
+        str_detect(vibr_sample_id, "EQ") ~ "Control sample",
+        str_detect(vibr_sample_id, "empty") ~ "Empty",
+        TRUE ~ "VIBRANT clinical sample"
+      )
+  )
+
+```
+
+```{r}
+
+qpcr |> dplyr::count(sample_type) |> arrange(-n)
+
+```
+
+
+
+```{r}
+
+tmp <- 
+  qpcr |> 
+  filter(sample_type == "VIBRANT clinical sample", target == target[1]) |>
+  group_by(vibr_sample_id) |> 
+  summarize(
+    n_replicates = n(),
+    n_plates = plate_number |> unique() |> length()
+  )
+
+# tmp |> dplyr::count(n_plates) # All samples's replicates are on a single plate
+
+# tmp |> dplyr::count(n_replicates) # All samples have 3 replicates
+
+```
+
+We note that all samples's replicates are on a single plate (`plate_number` or `g_dna_plate_id`); and all samples have the same number of replicates (3).
+
+
+The plate layout is as follows:
+
+```{r}
+
+qpcr <- 
+  qpcr |> 
+  mutate(well_col = well |> str_sub(1, 1), well_row = well |> str_sub(2,3) |> as.integer()) |> 
+  relocate(well_col, well_row, .after = well)
+
+```
+
+```{r}
+#| fig-width: 17
+#| fig-height: 7
+
+qpcr |> 
+  select(plate_number, well_col, well_row, sample_type, sample) |>
+  distinct() |>
+  ggplot() +
+  aes(x =  well_row |> factor(), y = well_col |> factor() |> fct_rev(), fill = sample_type) +
+  geom_tile() +
+  geom_path(aes(group = sample), col = "black", alpha = 0.5) +
+  geom_point() +
+  facet_wrap(~ plate_number, labeller = label_both) +
+  xlab("Well column") + ylab("Well row") +
+  labs(caption = "Black lines connect replicates") 
+  
+```
+
+We also define a unique sample ID according to each sample type.
+
+```{r}
+
+qpcr <- 
+  qpcr |> 
+  mutate(
+    sample_id = 
+      case_when(
+        sample_type == "VIBRANT clinical sample" ~ vibr_sample_id,
+        sample_type == "Control sample" ~ vibr_sample_id,
+        sample_type == "Empty" ~ str_c(vibr_sample_id,"_plate_", plate_number |> str_pad(width = 2, pad = 0),"_", sample),
+        sample_type == "Water" ~ str_c("water_plate", plate_number |> str_pad(width = 2, pad = 0)),
+        sample_type == "Standard" ~ str_c("std_", content |> str_remove("Std-"), "_plate_", plate_number |> str_pad(width = 2, pad = 0)),
+        TRUE ~ NA_character_
+      )
+  ) |> 
+  group_by(sample_id, target) |>
+  arrange(well_col, well_row) |>
+  mutate(replicate_nb = row_number()) |> 
+  ungroup() |> 
+  mutate(uid = str_c(sample_id, "_r", replicate_nb))
+
+```
+
+
+
+### Target's plate layout and fluorescent probes
+
+The plate x Fluorescence x Target layout is as follows:
+
+```{r}
+#| fig-width: 10
+#| fig-height: 4
+
+qpcr |> 
+  dplyr::count(fluor, target, vmrc_group, plate_id, plate_number) |> 
+  arrange(plate_number, vmrc_group, plate_id, fluor) |> 
+  mutate(
+    target = target |> fct_inorder(), 
+    plate_nb = str_c("plate nb: ", plate_number) |> fct_inorder(),
+    plate_id = plate_id |> fct_inorder()
+    ) |> 
+  ggplot() +
+  aes(
+    x = plate_id,
+    y = target |> factor() |> fct_rev(),
+    fill = fluor
+  ) +
+  geom_tile() +
+  facet_grid(vmrc_group ~ plate_nb, scales = "free", space = "free") +
+  xlab("Plate ID") +
+  ylab("Target") +
+  scale_fill_manual(
+    name = "Fluor.",
+    values = c("FAM" = "dodgerblue1", "HEX" = "green3", "Cy5" = "#F8766D")
+  ) +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text.y = element_text(angle = 0)
+  )
+
+```
+Potential batch effects due to extraction should be checked for `plate_number` and those due to the qPCR itself using the `plate_id`.
+
+### Dilution factors ?
+
+```{r}
+
+qpcr |> 
+  dplyr::count(target, dilution_factor) 
+
+```
+
+
+## Exploratory & QC analyses
+
+### Total number of copies per swab per sample type
+
+
+```{r}
+#| fig-width: 8
+#| fig-height: 5
+
+g <- 
+  qpcr |> 
+  ggplot() +
+  aes(x = target, y = copies_per_swab, col = sample_type, fill = sample_type) +
+  geom_boxplot(alpha = 0.5) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) 
+
+g 
+
+g + scale_y_log10()
+
+```
+
+
+```{r}
+#| fig-width: 8
+#| fig-height: 5
+
+g <- 
+  qpcr |> 
+  ggplot() +
+  aes(x = target, y = copies_per_swab, col = sample_type, fill = sample_type) +
+  geom_boxplot(alpha = 0.5) +
+  facet_grid(sample_type ~ ., scales = "free") +
+  guides(fill = "none", color = "none") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text.y = element_text(angle = 0)
+  )
+
+g 
+
+g + scale_y_log10()
+
+```
+
+
+```{r}
+#| fig-width: 8
+#| fig-height: 5
+
+
+g <- 
+  qpcr |> 
+  ggplot() +
+  aes(x = plate_number |> factor(), y = copies_per_swab, col = target, fill = target) +
+  geom_boxplot(alpha = 0.5) +
+  facet_grid(sample_type ~ ., scales = "free") +
+  xlab("Plate number") +
+  theme(
+    strip.text.y = element_text(angle = 0),
+    strip.text.x = element_text(angle = 90, hjust = 0)
+  )
+
+g 
+
+g + scale_y_log10() 
+
+```
+
+
+### Empty and water samples
+
+From the plot above, it looks like the empty and water samples have non-zero values on a few plates.
+
+
+```{r}
+
+plot_qpcr_empties <- function(qpcr, color_by = "sample_type") {
+  qpcr |> 
+    filter(sample_type %in% c("Empty", "Water")) |> 
+    group_by(sample, plate_id, plate_number, target) |>
+    mutate(replicate_nb = row_number()) |> 
+    ungroup() |> 
+    ggplot() +
+    aes(x = sample, y = copies_per_swab, label = replicate_nb, col = !!sym(color_by)) +
+    geom_text(size = 3) +
+    facet_grid(target ~ plate_number, scales = "free_x", space = "free_x") +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      strip.text.y = element_text(angle = 0)
+    ) 
+}
+
+```
+
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+
+plot_qpcr_empties(qpcr, color_by = "sample_type") 
+
+plot_qpcr_empties(qpcr |> mutate(zero_copies = (copies_per_swab == 0)), color_by = "zero_copies") 
+
+```
+
+```{r}
+
+prob_target <-
+  qpcr |> 
+  select(target) |> 
+  distinct() |> 
+  mutate(prob_target = (target %in% c("C0022A1", "C0059E1", "C0175A1")))
+  
+```
+
+
+::: callout-warning
+We may have to check the values for targets `r prob_target$target[prob_target$prob_target] |> str_c(collapse = ", ")`.
+:::
+
+```{r}
+
+prob_target <- 
+  prob_target |> 
+  mutate(prob_target = if_else(prob_target, "x", "v")) 
+
+qpcr <- 
+  qpcr |> 
+  left_join(prob_target, by = "target") 
+  
+```
+
+
+
+
+### Control samples
+
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+
+qpcr |> 
+  filter(sample_type %in% c("Control sample")) |> 
+  group_by(sample, plate_id, plate_number, target) |>
+  mutate(replicate_nb = row_number()) |> 
+  ungroup() |> 
+  ggplot() +
+  aes(x = vibr_sample_id, y = copies_per_swab, label = replicate_nb, col = replicate_nb |> factor()) +
+  geom_text(size = 3) +
+  scale_y_log10() +
+  scale_color_discrete("replicate") +
+  facet_grid(prob_target + target ~ plate_number, scales = "free_x", space = "free_x") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text.y = element_text(angle = 0)
+  ) 
+
+```
+
+From these plots, I assume that some of these controls are negative controls and others are positive controls.
+
+> TODO: check if they match the sampleID from the metagenomics data or if we need a manifest.
+
+Replicability looks good, but we note the same issues with the problematic targets in the (likely) negative controls as in the empty samples.
+
+
+
+### Standards
+
+> TODO
+
+### Clinical samples
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 10
+
+qpcr |> 
+  filter(sample_type %in% c("VIBRANT clinical sample")) |> 
+  group_by(vibr_sample_id, sample, plate_id, plate_number, target) |>
+  mutate(
+    replicate_nb = row_number(),
+    median_cps = median(copies_per_swab, na.rm = TRUE),
+    mean_cps = mean(copies_per_swab, na.rm = TRUE)
+    ) |> 
+  ungroup() |> 
+  mutate(vibr_sample_id = vibr_sample_id |> fct_reorder(mean_cps)) |>
+  ggplot() +
+  aes(x = vibr_sample_id, y = copies_per_swab, label = replicate_nb, col = replicate_nb |> factor()) +
+  geom_line(aes(group = vibr_sample_id), col = "black", linewidth = 0.1) +
+  geom_text(size = 3) +
+  scale_y_log10() +
+  scale_color_discrete("replicate") +
+  scale_x_discrete("Samples", breaks = NULL) +
+  facet_grid(prob_target + target ~ plate_number, scales = "free_x", space = "free_x") +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text.y = element_text(angle = 0)
+  )
+
+```
+We notice the same issues with the problematic targets in plate 1-3 (bottom, left).
+
+
+
+
+These three targets are from the same plates (`plate_id` column):
+
+```{r}
+
+qpcr |> 
+  filter(prob_target == "x", plate_number %in% 1:3) |> 
+  select(target, fluor, plate_id, plate_number) |> 
+  distinct() |> 
+  gt()
+
+```
+
+```{r}
+#| fig-width: 15
+#| fig-height: 10
+
+qpcr |> 
+  filter(prob_target == "x", plate_number %in% 1:3) |> 
+  select(target, fluor, plate_id, plate_number, starts_with("well"), sample, vibr_sample_id, sample_type, copies_per_swab) |> 
+  arrange(sample_type) |>
+  ggplot() +
+  aes(x = well_row |> factor(), y = well_col |> fct_rev(), fill = sample_type) +
+  geom_tile() +
+  geom_point(aes(size = copies_per_swab |> log10())) +
+  geom_line(aes(group = sample), col = "black", alpha = 0.5) +
+  facet_grid(target ~ plate_number) +
+  coord_fixed() +
+  xlab("Well column") + ylab("Well row") +
+  labs(caption = "Black lines connect replicates") 
+
+```
+
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 10
+
+qpcr |> 
+  filter(prob_target == "x", plate_number %in% 1:4) |> 
+  select(target, fluor, plate_id, plate_number, starts_with("well"), sample, vibr_sample_id, sample_type, dilution_factor, copies_per_swab) |> 
+  arrange(sample_type) |>
+  ggplot() +
+  aes(x = well_row |> factor(), y = well_col |> fct_rev(), fill = sample_type) +
+  geom_tile(aes(alpha = dilution_factor)) +
+  geom_point(aes(size = copies_per_swab |> log10())) +
+  geom_line(aes(group = sample), col = "black", alpha = 0.5) +
+  facet_grid(target ~ plate_number) +
+  coord_fixed() +
+  xlab("Well column") + ylab("Well row") +
+  labs(caption = "Black lines connect replicates") 
+
+```
+
+
+
+There isn't a clear "geometrical" pattern on the plate, nor a clear dilution factor association. Let's just assume that these three plates failed.
+
+
+::: callout-warning
+We could simply discard these values (exclude these targets x plates) or take the minimum when aggregating across replicates (probably not a good idea for the remaining good plates).
+:::
+
+
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 10
+
+qpcr |> 
+  filter(prob_target == "x", plate_number %in% 1:4) |> 
+  select(target, fluor, plate_id, plate_number, starts_with("well"), sample, vibr_sample_id, sample_type, dilution_factor, copies_per_swab, cq) |> 
+  arrange(sample_type) |>
+  ggplot() +
+  aes(x = well_row |> factor(), y = well_col |> fct_rev(), fill = sample_type) +
+  geom_tile(aes(alpha = dilution_factor)) +
+  geom_point(aes(size = cq |> log10())) +
+  geom_line(aes(group = sample), col = "black", alpha = 0.5) +
+  facet_grid(target ~ plate_number) +
+  coord_fixed() +
+  xlab("Well column") + ylab("Well row") +
+  labs(caption = "Black lines connect replicates") 
+
+```
+
+
+## Creating `SummarizedExperiment` objects
+
+We create two `Summarized Experiment` objects:
+
+- one with all values as provided in the original file, where each "sample" is a plate well and each feature is a target (LBP taxa), with the following assays
+
+    + cq values (`cq`)
+    + `starting_quantity_sq`
+    + `cq_mean`
+    + `quant_adjusted`
+    + `copies_per_swab_raw` (current `copies_per_swab` column)
+    + `copies_per_swab` (where "problematic" targets x plates are set to NA)
+    
+    The `colData` contains the following columns: 
+        
+        + `uid`
+        + `sample_id`
+        + `sample`
+        + `vibr_sample_id`
+        + `sample_type`
+        + `plate_number` 
+        + `g_dna_plate_id`
+        + (`dilution_factor`)
+        
+    The `rowData` contains the following columns:
+    
+        + `fluor`
+        + `plate_ids` (the concatenation of `plate_id` for each `plate_number`)
+        + `valid_plates` (the plate_number where signal looked good)
+        
+        
+- one with summarized values (aggregated across replicates) where each "sample" is a VIBRANT sample ID (including control samples) and each feature is a target (LBP taxa), with the following assays
+
+    + `copies_per_swab_med` (the median `copies_per_swab` across replicates)
+    + `copies_per_swab_mean` (the mean `copies_per_swab` across replicates)
+    + `copies_per_swab_cv` (the coefficient of variation of the `copies_per_swab` across replicates)
+
+    The `colData` contains the following columns: 
+        
+        + `sample_type`
+        + `vibr_sample_id`
+        + `sample`
+        + `plate_number` 
+        + `g_dna_plate_id`
+        + `dilution_factor`
+        
+    The `rowData` contains the following columns:
+    
+        + `fluor`
+        + `vmrc_group`
+        + `plate_ids` (the concatenation of `plate_id` for each `plate_number`)
+        + `valid_plates` (the plate_number where signal looked good)
+
+        
+### Raw `SummarizedExperiment` object
+
+
+We first identify potential issues with qPCR plates if the `copies_per_swab` values are not zero for the empty and water wells.
+
+```{r}
+#| fig-height: 4
+#| fig-width: 10
+
+map(
+  qpcr$vmrc_group |> unique(),
+  ~{
+    qpcr |> 
+      filter(vmrc_group == .x) |> 
+      filter(
+        sample_type %in% c("Empty", "Water"), 
+        str_detect(sample_id, "G12")|str_detect(sample_id, "H12")|str_detect(sample_id, "water")
+        ) |>
+      ggplot() +
+      aes(x = target, y = copies_per_swab, col = target, fill = target) +
+      # geom_boxplot(alpha = 0.5, outlier.shape = NA) +
+      geom_point(aes(shape = sample_type), alpha = 0.3) +
+      # ggbeeswarm::geom_quasirandom(alpha = 0.5) +
+      scale_y_log10() + expand_limits(y = 1) +
+      facet_wrap(. ~ plate_number + plate_id, nrow = 2, scales = "free_x") +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+      guides(col = "none", fill = "none") +
+      ggtitle(str_c("qPCR plates for targets of group ", .x)) 
+  }
+)
+
+```
+Plates are flagged as non-valid if there are more than 25% of the empty or water samples with non-zero values.
+
+```{r}
+
+valid_plates <- 
+  qpcr |> 
+  filter(
+    sample_type %in% c("Empty", "Water"), 
+    str_detect(sample_id, "G12")|str_detect(sample_id, "H12")|str_detect(sample_id, "water")
+  ) |>
+  group_by(plate_number, plate_id, vmrc_group) |>
+  summarize(
+    n = n(),
+    n_non_zero = sum(copies_per_swab > 0, na.rm = TRUE),
+    .groups = "drop"
+  ) |> 
+  mutate(
+    f_non_zero = n_non_zero / n,
+    valid = (f_non_zero <= 1/4) & (n_non_zero <= 2)
+  ) 
+  
+valid_plates |> filter(!valid) |> gt(caption = "qPCR plates flagged as non-valid.")
+  
+```
+
+```{r}
+
+qpcr <- 
+  qpcr |> 
+  left_join(
+    valid_plates |> 
+      dplyr::rename(valid_qpcr_plate = valid) |>
+      select(plate_id, valid_qpcr_plate) |> 
+      distinct(),
+    by = join_by(plate_id)
+  )
+
+```
+
+
+```{r}
+
+make_raw_qpcr_SE <- function(qpcr){
+  
+  qpcr <- 
+    qpcr |> 
+    arrange(plate_number, well_col, well_row) |>
+    mutate(uid = uid |> fct_inorder()) |> 
+    arrange(vmrc_group, fluor) |> 
+    mutate(target = target |> fct_inorder()) |> 
+    arrange(uid, target)
+    
+  
+  cq_assay <- 
+    qpcr |>
+    select(uid, target, cq) |> 
+    arrange() |> 
+    pivot_wider(names_from = uid, values_from = cq) |> 
+    as.data.frame() |> 
+    column_to_rownames("target") 
+  
+  starting_quantity_sq_assay <- 
+    qpcr |>
+    select(uid, target, starting_quantity_sq) |> 
+    arrange() |> 
+    pivot_wider(names_from = uid, values_from = starting_quantity_sq) |> 
+    as.data.frame() |> 
+    column_to_rownames("target")
+  
+   cq_mean_assay <- 
+    qpcr |>
+    select(uid, target, cq_mean) |> 
+    arrange() |> 
+    pivot_wider(names_from = uid, values_from = cq_mean) |> 
+    as.data.frame() |> 
+    column_to_rownames("target")
+   
+   quant_adjusted_assay <- 
+     qpcr |>
+     select(uid, target, quant_adjusted) |> 
+     arrange() |> 
+     pivot_wider(names_from = uid, values_from = quant_adjusted) |> 
+     as.data.frame() |> 
+     column_to_rownames("target")
+   
+   copies_per_swab_raw_assay <- 
+     qpcr |>
+     select(uid, target, copies_per_swab) |> 
+     arrange() |> 
+     pivot_wider(names_from = uid, values_from = copies_per_swab) |> 
+     as.data.frame() |> 
+     column_to_rownames("target")
+   
+  copies_per_swab_assay <- 
+    qpcr |>
+    mutate(copies_per_swab_valid = ifelse(valid_qpcr_plate, copies_per_swab, NA)) |> 
+    select(uid, target, copies_per_swab_valid) |> 
+    arrange() |> 
+    pivot_wider(names_from = uid, values_from = copies_per_swab_valid) |> 
+    as.data.frame() |> 
+    column_to_rownames("target")
+  
+   coldata <- 
+     qpcr |> 
+     select(uid, sample_id, replicate_nb, sample, vibr_sample_id, sample_type, plate_number, g_dna_plate_id) |> 
+     distinct() |> 
+     arrange(uid) |> 
+     as.data.frame() |> 
+     mutate(rownames = uid) |> 
+     column_to_rownames("rownames")
+   
+   rowdata <-
+     qpcr |> 
+     select(target, fluor, vmrc_group, plate_id, valid_qpcr_plate, plate_number) |> 
+     distinct() |> 
+     arrange(target, plate_number) |> 
+     group_by(target) |> 
+     mutate(
+       plate_id = str_c(plate_id, " (gDNA plate ", plate_number |> str_pad(width = 2, pad = "0"), ")", sep = ""),
+     ) |> 
+     summarize(
+       fluor = fluor |> unique() |> str_c(collapse = ", "),
+       vmrc_group = vmrc_group |> unique() |> str_c(collapse = ", "),
+       plate_ids = plate_id |> unique() |> str_c(collapse = ", "),
+       non_valdid_plates = plate_id[!valid_qpcr_plate] |> unique() |> str_c(collapse = ", ")
+     ) |> 
+     ungroup() |> 
+     as.data.frame() |> 
+     mutate(rownames = target) |> 
+     column_to_rownames("rownames")
+   
+   SE <- SummarizedExperiment(
+     assays = list(
+       cq = cq_assay |> as.matrix(),
+       starting_quantity_sq = starting_quantity_sq_assay |> as.matrix(),
+       cq_mean = cq_mean_assay |> as.matrix(),
+       quant_adjusted = quant_adjusted_assay |> as.matrix(),
+       copies_per_swab_raw = copies_per_swab_raw_assay |>  as.matrix(),
+       copies_per_swab = copies_per_swab_assay |> as.matrix()
+     ),
+     colData = coldata,
+     rowData = rowdata
+   )
+   
+   SE
+  
+}
+
+```
+
+
+```{r}
+
+SE_qPCR_raw <- make_raw_qpcr_SE(qpcr)
+
+```
+
+
+
+### Aggregated `SummarizedExperiment` object
+
+      
+- one with summarized values (aggregated across replicates) where each "sample" is a VIBRANT sample ID (including control samples) and each feature is a target (LBP taxa), with the following assays
+
+    + `copies_per_swab_med` (the median `copies_per_swab` across replicates)
+    + `copies_per_swab_mean` (the mean `copies_per_swab` across replicates)
+    + `copies_per_swab_cv` (the coefficient of variation of the `copies_per_swab` across replicates)
+
+    The `colData` contains the following columns: 
+        
+        + `sample_type`
+        + `vibr_sample_id`
+        + `sample`
+        + `plate_number` 
+        + `g_dna_plate_id`
+        + ? `dilution_factor`
+        
+    The `rowData` contains the following columns:
+    
+        + `fluor`
+        + `vmrc_group`
+        + `plate_ids` (the concatenation of `plate_id` for each `plate_number`)
+        + `valid_plates` (the plate_number where signal looked good)
+
+
+
+```{r}
+
+make_agg_qpcr_SE <- function(qpcr){
+  
+  qpcr <- 
+    qpcr |> 
+    filter(sample_type %in% c("VIBRANT clinical sample", "Control sample")) |>
+    arrange(plate_number, well_col, well_row) |>
+    mutate(uid = uid |> fct_inorder(), sample_id = sample_id |> fct_inorder()) |> 
+    arrange(vmrc_group, fluor) |> 
+    mutate(target = target |> fct_inorder()) |> 
+    arrange(uid, target)
+    
+  summarized_qpcr <- 
+    qpcr |>
+    group_by(sample_id, target) |> 
+    summarize(
+      copies_per_swab_med = median(copies_per_swab),
+      copies_per_swab_mean = mean(copies_per_swab),
+      copies_per_swab_sd = sd(copies_per_swab),
+      .groups = "drop"
+    ) |> 
+    mutate(
+      copies_per_swab_cv = ifelse(copies_per_swab_sd == 0, 0, copies_per_swab_sd / copies_per_swab_mean)
+    ) 
+  
+  coldata <- 
+    qpcr |> 
+    select(sample_id, vibr_sample_id, sample, sample_type, plate_number, g_dna_plate_id) |>
+    distinct() |> 
+    arrange(sample_id) |> 
+    left_join(
+      qpcr |> 
+        select(sample_id, plate_id, valid_qpcr_plate) |> 
+        group_by(sample_id) |> 
+        summarize(
+          plate_ids = str_c(plate_id, collapse = ", "),
+          non_valid_plate_ids = str_c(plate_id[!valid_qpcr_plate], collapse = ", ")
+        ),
+      by = join_by(sample_id)
+    ) |> 
+    as.data.frame() |> 
+    mutate(rownames = sample_id) |> 
+    column_to_rownames("rownames")
+   
+   rowdata <-
+     qpcr |> 
+     select(target, fluor, vmrc_group, plate_id, plate_number) |> 
+     distinct() |> 
+     arrange(target, plate_number) |> 
+     group_by(target) |> 
+     mutate(
+       plate_id = str_c(plate_id, " (gDNA plate ", plate_number |> str_pad(width = 2, pad = "0"), ")", sep = ""),
+     ) |> 
+     summarize(
+       fluor = fluor |> unique() |> str_c(collapse = ", "),
+       vmrc_group = vmrc_group |> unique() |> str_c(collapse = ", "),
+       plate_ids = plate_id |> unique() |> str_c(collapse = ", ")
+     ) |> 
+     ungroup() |> 
+     as.data.frame() |> 
+     mutate(rownames = target) |> 
+     column_to_rownames("rownames") 
+   
+   SE <- SummarizedExperiment(
+     assays = list(
+       copies_per_swab_med = 
+         summarized_qpcr |> 
+         pivot_wider(id_cols = target, names_from = sample_id, values_from = copies_per_swab_med) |> 
+         as.data.frame() |> 
+         column_to_rownames("target") |> 
+         as.matrix(),
+       copies_per_swab_mean = 
+         summarized_qpcr |> 
+         pivot_wider(id_cols = target, names_from = sample_id, values_from = copies_per_swab_mean) |> 
+         as.data.frame() |> 
+         column_to_rownames("target") |> 
+         as.matrix(),
+       copies_per_swab_cv = 
+         summarized_qpcr |> 
+         pivot_wider(id_cols = target, names_from = sample_id, values_from = copies_per_swab_cv) |> 
+         as.data.frame() |> 
+         column_to_rownames("target") |> 
+         as.matrix()
+     ),
+     colData = coldata,
+     rowData = rowdata
+   )
+   
+   SE
+     
+}
+
+```
+
+
+```{r}
+
+SE_qPCR_agg <- make_agg_qpcr_SE(qpcr)
+
+```
+
+
+## Save `SummarizedExperiment` objects
+
+Save the `SE` objects to disk
+
+```{r}
+
+saveRDS(
+  SE_qPCR_raw, 
+  str_c(
+    get_output_dir(data_source = data_source),  
+    "03_se_pcr_raw_", today() |> str_remove_all("-"), ".rds"
+    )
+  )
+
+
+saveRDS(
+  SE_qPCR_agg, 
+  str_c(
+    get_output_dir(data_source = data_source),  
+    "03_se_pcr_agg_", today() |> str_remove_all("-"), ".rds"
+    )
+  )
+
+```
+
+

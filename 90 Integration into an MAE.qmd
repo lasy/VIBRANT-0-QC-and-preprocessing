@@ -1,0 +1,199 @@
+---
+title: "VIBRANT Luminex QC - batch 1"
+author: Laura Symul
+date: today
+format: 
+   html:
+     page-layout: full
+     code-fold: true
+     toc: true
+     toc-location: left
+     toc-depth: 5
+     embed-resources: true
+execute:
+  cache: refresh # true refresh false
+  warning: false
+knitr:
+  opts_chunk:
+    out.width: "100%"
+editor: source
+---
+
+```{r}
+#| warning: false
+
+library(tidyverse)
+library(magrittr)
+library(gt)
+library(patchwork)
+library(SummarizedExperiment)
+library(tidySummarizedExperiment)
+library(MultiAssayExperiment)
+
+tmp <- fs::dir_map("R Luminex/", source)
+
+theme_set(theme_light())
+```
+
+# Loading the `SummarizedExperiment` objects 
+
+```{r}
+
+data_source <- "real"
+data_dir <- str_c(get_data_dir(data_source), "01 Preprocessed and QCed/")
+se_files <- fs::dir_ls(data_dir, regexp = "se_.*\\.rds$")
+
+```
+
+## Metagenomics data
+
+
+```{r}
+
+mg_file <- se_files[grepl("mg", se_files)][1]
+se_mg <- readRDS(mg_file)
+se_mg
+
+```
+
+## qPCR data
+
+```{r}
+
+qPCR_file <- se_files[grepl("pcr_agg", se_files)][1]
+se_qPRC <- readRDS(qPCR_file)
+se_qPRC
+
+```
+
+# Creating the `MultiAssayExperiment` object
+
+```{r}
+
+mae_coldata <- 
+  tibble(
+    sample_id = unique(c(colnames(se_mg), colnames(se_qPRC)))
+  ) |> 
+  left_join(
+    colData(se_qPRC) |> 
+      as.data.frame() |> 
+      as_tibble() |> 
+      select(sample_id, sample_type),
+    by = join_by(sample_id)
+  ) |> 
+  mutate(rownames = sample_id) |> 
+  as.data.frame() |> 
+  column_to_rownames("rownames") 
+
+```
+
+```{r}
+
+
+assay_list <- 
+  list(
+    mg = se_mg,
+    qPCR = se_qPRC
+  )
+
+mae <- 
+  MultiAssayExperiment(
+    experiments = MultiAssayExperiment::ExperimentList(assay_list),
+    colData = mae_coldata,
+    metadata = list(
+      study = "VIBRANT",
+      MAE_creation_date = today()
+    )
+  )
+
+```
+
+# Available assays
+
+```{r}
+
+assay_list <- 
+  tibble(
+    assay = c( "mg","qPCR"),
+    assay_label = 
+      c(
+        "Metagenomic", "qPCR"
+      )
+  ) 
+
+mae_sample_map <- 
+  mae@sampleMap |> as_tibble() |> filter(assay %in% assay_list$assay) |>
+  select(sample_id = primary, assay) |> 
+  arrange(sample_id) |> 
+  left_join(assay_list, by = join_by(assay)) |> 
+  right_join(mae_coldata |> select(sample_id, sample_type), by = join_by(sample_id))
+
+```
+
+```{r}
+#| fig-height: 8
+#| fig-width: 4
+
+mae_sample_map |> 
+  filter(!is.na(assay)) |> 
+  mutate(assay_label = assay_label |> factor(levels = assay_list$assay_label)) |> 
+  ggplot() +
+  aes(x = assay_label, y = sample_id, fill = assay_label) +
+  geom_tile() +
+  facet_grid(sample_type ~ ., scales = "free_y", space = "free_y") +
+#  facet_grid(arm ~ visit, scales = "free_y", space = "free_y") +
+#  scale_y_discrete("Participants IDs") + #, breaks = "NULL")  +
+  scale_y_discrete("Sample IDs", breaks = NULL) +
+  xlab("") +
+  scale_fill_brewer("Assay", type = "qual", palette = 7) + # 3
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.text.y = element_text(angle = 0),
+    legend.position = "bottom"
+    )
+
+```
+
+
+```{r}
+#| eval: false
+#| fig-height: 8
+#| fig-width: 8
+
+mae_sample_map |> 
+  filter(!is.na(assay)) |> 
+  mutate(assay_label = assay_label |> factor(levels = assay_list$assay_label)) |> 
+  ggplot() +
+  aes(x = assay_label, y = pid, fill = assay_label) +
+  geom_tile() +
+  facet_grid(arm ~ visit, scales = "free_y", space = "free_y") +
+  scale_y_discrete("Participants IDs") + #, breaks = "NULL")  +
+  xlab("") +
+  scale_fill_brewer("Assay", type = "qual", palette = 7) + # 3
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom"
+    )
+
+```
+
+
+# Subsetting and saving the `MultiAssayExperiment` objects
+
+We save the "master" MAE (with all assays); but if needed for publication, we can subset the MAE to only include the assays/data of interest.
+
+```{r}
+
+saveRDS(
+  mae, 
+  str_c(
+    get_data_dir(data_source = data_source),  
+    "02 MAEs/",
+    "mae_full_", today() |> str_remove_all("-"), ".rds"
+  )
+)
+
+```
+
+
+
