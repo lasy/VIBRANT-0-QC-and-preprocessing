@@ -1,13 +1,11 @@
-/10-Luminex_cache
-zz Purgatory.qmd
 VIBRANT-0-QC-and-preprocessing.Rproj
 .Rproj.user
 .DS_Store
 
+*_cache
+zz Purgatory.qmd
 /ZZ Archives
 .Rhistory
 *.rdx
 *.RData
 *.rdb
-/10b-Luminex-Batch-2_cache
-/10a-Luminex-Batch-1_cache
