@@ -1,0 +1,260 @@
+---
+title: "QC across assays & MAE augmentation"
+author: Laura Symul
+date: today
+format: 
+   html:
+     page-layout: full
+     code-fold: true
+     toc: true
+     toc-location: left
+     toc-depth: 5
+     embed-resources: true
+execute:
+  cache: refresh # true refresh false
+  warning: false
+knitr:
+  opts_chunk:
+    out.width: "100%"
+editor: source
+---
+
+```{r}
+#| warning: false
+
+library(tidyverse)
+library(magrittr)
+library(gt)
+library(patchwork)
+library(SummarizedExperiment)
+library(tidySummarizedExperiment)
+library(MultiAssayExperiment)
+
+tmp <- fs::dir_map("R scripts/", source)
+
+theme_set(theme_light())
+```
+
+# Loading the `MultiAssayExperiment` object
+
+```{r}
+
+data_source <- "real"
+mae_files <- 
+  fs::dir_ls(
+    str_c(
+      get_data_dir(data_source = data_source),  
+      "02 MAEs/"
+    ),
+    regexp = "mae_full_.*\\.rds$"
+  ) |> 
+  sort(decreasing = TRUE) |>
+  magrittr::extract(1)
+
+mae <- readRDS(mae_files)
+
+rm(mae_files)
+
+```
+
+
+# Comparing qPCR and metagenomics
+
+
+```{r}
+#| eval: true
+#| fig-width: 10
+#| fig-height: 8
+
+tmp <- 
+  dplyr::inner_join(
+    mae[["mg"]] |> 
+      as_tibble() |>
+      filter(!is.na(LBP)) |> 
+      filter(!is.na(rel_abs_bact)) |> 
+      select(.feature, .sample, rel_abs_bact, sample_type) |> 
+      dplyr::rename(
+        mg_rel_ab_bact = rel_abs_bact
+      ),
+    mae[["qPCR"]] |>
+      as_tibble() |>
+      filter(!is.na(LBP)) |> 
+      select(.feature, .sample, copies_per_swab_med, copies_per_swab_cv, strain_group_qpcr),
+    by = join_by(.feature, .sample)
+  )
+
+tmp |> 
+  ggplot() +
+  aes(x = mg_rel_ab_bact, y = copies_per_swab_med, color = sample_type) +
+  geom_point(alpha = 0.3, size = 1) +
+  facet_wrap(~ strain_group_qpcr + .feature) +
+  scale_y_log10() +
+  scale_x_log10()
+
+tmp |> 
+  dplyr::count(.feature, mg_rel_ab_bact > 0, copies_per_swab_med > 0) |> 
+  ggplot() +
+  aes(x = `mg_rel_ab_bact > 0`, y = `copies_per_swab_med > 0`) +
+  geom_tile(aes(fill = n)) +
+  geom_text(aes(label = n)) +
+  scale_fill_gradient(low = "white", high = "dodgerblue3") +
+  facet_wrap(~ .feature) 
+
+
+tmp |> 
+  dplyr::count(.feature, mg_rel_ab_bact > 0, copies_per_swab_med > 1e+05) |> 
+  ggplot() +
+  aes(x = `mg_rel_ab_bact > 0`, y = `copies_per_swab_med > 1e+05`) +
+  geom_tile(aes(fill = n)) +
+  geom_text(aes(label = n)) +
+  scale_fill_gradient(low = "white", high = "dodgerblue3") +
+  facet_wrap(~ .feature) 
+
+
+tmp |> 
+  dplyr::count(.feature, mg_rel_ab_bact > 0, copies_per_swab_med > 10000) |> 
+  ggplot() +
+  aes(x = `mg_rel_ab_bact > 0`, y = `copies_per_swab_med > 10000`) +
+  geom_tile(aes(fill = n)) +
+  geom_text(aes(label = n)) +
+  scale_fill_gradient(low = "white", high = "dodgerblue3") +
+  facet_wrap(~ .feature) 
+
+```
+
+> TODO sensitivity-specificity curves for each LBP
+
+# Comparing temporal profiles (for 10 "random" participants)
+
+
+## Weekly profiles
+
+```{r}
+
+
+weekly_samples_from_randomized_participants <- 
+  dplyr::inner_join(
+    tibble(uid = mae[["mg"]]$uid),
+    tibble(uid = mae[["amplicon"]]$uid),
+    by = join_by(uid)
+  ) |> 
+  dplyr::inner_join(
+    mae@colData |> as.data.frame() |> as_tibble() |> 
+      filter(randomized) |> 
+      select(uid, pid, visit_code, randomized, group4),
+    by = join_by(uid)
+  )
+
+mae_sub <- mae[, weekly_samples_from_randomized_participants$uid]
+  
+```
+
+```{r}
+
+random_pids <- mae_sub$pid |> table() |> sort(decreasing = TRUE) |> names() |> head(10)
+
+```
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 8
+
+map(
+  random_pids,
+  plot_data_for_pid,
+  mae_sub = mae_sub
+)
+```
+
+
+
+## Full profiles
+
+```{r}
+
+
+all_samples_from_randomized_participants <- 
+  dplyr::full_join(
+    tibble(uid = mae[["mg"]]$uid),
+    tibble(uid = mae[["amplicon"]]$uid),
+    by = join_by(uid)
+  ) |> 
+  dplyr::inner_join(
+    mae@colData |> as.data.frame() |> as_tibble() |> 
+      filter(randomized) |> 
+      select(uid, pid, visit_code, randomized, group4),
+    by = join_by(uid)
+  )
+
+mae_sub <- mae[, all_samples_from_randomized_participants$uid]
+  
+```
+
+```{r}
+
+# random_pids <- mae_sub$pid |> table() |> sort(decreasing = TRUE) |> names() |> head(10)
+
+```
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 8
+
+map(
+  random_pids,
+  plot_data_for_pid,
+  mae_sub = mae_sub
+)
+```
+
+
+
+# Participant groups
+
+
+"Guessing the arms" based on the MG and qPCR data
+
+- if at least > 3% of any LBP115-specific strains or > 10% of all LBP115-specific strains in the MG data at any time-point -> "115"
+
+- if in group 4 -> overlap arm
+
+- if at least 3% of any LBP106 strains or > 10% of all LBP106 strains in the qPCR data at any time-point -> "106 3 or 7"
+
+- otherwise -> placebo
+
+> TODO
+
+```{r}
+
+
+
+
+
+```
+
+
+
+
+
+
+# Saving the `MultiAssayExperiment` objects
+
+We save the "master" MAE (with all assays); but if needed for publication, we can subset the MAE to only include the assays/data of interest.
+
+```{r}
+
+saveRDS(
+  mae, 
+  str_c(
+    get_data_dir(data_source = data_source),  
+    "03 QCed MAEs/",
+    "mae_full_", today() |> str_remove_all("-"), ".rds"
+  )
+)
+
+```
+
+
+
