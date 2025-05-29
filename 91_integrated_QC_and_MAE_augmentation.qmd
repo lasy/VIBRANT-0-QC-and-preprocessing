@@ -239,11 +239,11 @@ map(
 
 "Guessing the arms" based on the MG and qPCR data
 
-- if at least > 3% of any LBP115-specific strains or > 10% of all LBP115-specific strains in the MG data at any time-point -> "115"
+- "LC-115" if at any visit, two-three LBP115-specific strains are detected >0
 
-- if in group 4 -> overlap arm
+- "LC-106-o" if in group 4 
 
-- if at least 3% of any LBP106 strains or > 10% of all LBP106 strains in the qPCR data at any time-point -> "106 3 or 7"
+- "LC-106-3 or -7" if at any visit, two LBP106-specific strains are detected >0
 
 - otherwise -> placebo
 
