@@ -3,7 +3,8 @@ plot_data_for_pid <- function(selected_pid, mae_sub){
   
   mae_selected_pid <- mae_sub[, mae_sub$pid == selected_pid]
   
-  all_visits <- tibble(visit_code = mae_selected_pid$visit_code)
+  #all_visits <- tibble(visit_code = mae_selected_pid$visit_code)
+  all_visits <- mae_sub$visit_code |> unique()  |> sort() |> as_tibble() |> rename(visit_code = value)
   
   mg_ <- 
     mae_selected_pid[["mg"]] |> 
