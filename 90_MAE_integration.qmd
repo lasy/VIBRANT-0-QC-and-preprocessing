@@ -43,9 +43,12 @@ theme_set(theme_light())
 
 ```{r}
 
+# crf_data_path <- fs::dir_ls(
+#   "/Users/laurasymul/OneDrive - UCL/Academia/Research/VIBRANT clinical data UCLouvain/Data processed/"
+# ) |> sort(decreasing = TRUE) |> str_subset("2025-05-26") 
+
 crf_data_path <- fs::dir_ls(
-  "/Users/laurasymul/OneDrive - UCL/Academia/Research/VIBRANT clinical data UCLouvain/Data processed/"
-) |> sort(decreasing = TRUE) |> str_subset("2025-05-26") 
+  "/Users/lvermeren/OneDrive - UCL/VIBRANT clinical data/Data processed/") |> sort(decreasing = TRUE) |> magrittr::extract(1) #LV
 
 ```
 
@@ -66,6 +69,7 @@ load(str_c(crf_data_path, "/crf_plates_dictionary.RData"), verbose = TRUE)
 
 load(str_c(crf_data_path, "/participants.RData"), verbose = TRUE)
 load(str_c(crf_data_path, "/participants_variable_dictionary.RData"), verbose = TRUE)
+load(str_c(crf_data_path, "/participant_crfs_merged.RData"), verbose = TRUE)
 
 ```
 
@@ -74,6 +78,7 @@ load(str_c(crf_data_path, "/participants_variable_dictionary.RData"), verbose = 
 ```{r}
 
 load(str_c(crf_data_path, "/visits.RData"), verbose = TRUE)
+load(str_c(crf_data_path, "/visits_crfs_merged.RData"), verbose = TRUE)
 
 ```
 
@@ -466,7 +471,9 @@ mae <-
       colData_dictionary = participants_variable_dictionary,
       crf_plates_description = crf_plates_dictionary,
       crf_data_raw = crf_raw,
-      crf_data_clean = crf_clean
+      crf_data_clean = crf_clean, 
+      participant_crfs_merged = participant_crfs_merged,
+      visits_crfs_merged = visits_crfs_merged
     )
   )
 
