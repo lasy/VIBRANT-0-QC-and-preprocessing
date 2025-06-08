@@ -1,6 +1,6 @@
 ---
 title: "Assembling assays into a master `MultiAssayExperiment` object"
-author: Laura Symul
+author: Laura Symul, Laura Vermeren
 date: today
 format: 
    html:
@@ -43,12 +43,12 @@ theme_set(theme_light())
 
 ```{r}
 
-# crf_data_path <- fs::dir_ls(
-#   "/Users/laurasymul/OneDrive - UCL/Academia/Research/VIBRANT clinical data UCLouvain/Data processed/"
-# ) |> sort(decreasing = TRUE) |> str_subset("2025-05-26") 
-
 crf_data_path <- fs::dir_ls(
-  "/Users/lvermeren/OneDrive - UCL/VIBRANT clinical data/Data processed/") |> sort(decreasing = TRUE) |> magrittr::extract(1) #LV
+  "/Users/laurasymul/OneDrive - UCL/Academia/Research/VIBRANT clinical data UCLouvain/Data processed/"
+) |> sort(decreasing = TRUE) |> str_subset("2025-05-26")
+
+# crf_data_path <- fs::dir_ls(
+#   "/Users/lvermeren/OneDrive - UCL/VIBRANT clinical data/Data processed/") |> sort(decreasing = TRUE) |> magrittr::extract(1) #LV
 
 ```
 
@@ -166,6 +166,18 @@ se_luminex
 
 ```
 
+
+## Flow cytometry data
+
+
+```{r}
+
+flow_file <- se_files[grepl("flow", se_files)][1]
+se_flow <- readRDS(flow_file)
+se_flow
+
+```
+
 # Creating the `MultiAssayExperiment` object
 
 ## Assay list
@@ -193,6 +205,11 @@ assay_list <-
       mae_assay_name = "luminex", 
       se_object_name = "se_luminex", 
       assay_label = "Luminex"
+      ),
+    tibble(
+      mae_assay_name = "flow", 
+      se_object_name = "se_flow", 
+      assay_label = "Flow cytometry"
       )
   ) |> 
   mutate(
@@ -452,7 +469,8 @@ SE_list <-
     mg = se_mg,
     qPCR = se_qPRC,
     amplicon = se_16S,
-    luminex = se_luminex
+    luminex = se_luminex,
+    flow = se_flow
   )
 
 
@@ -471,9 +489,9 @@ mae <-
       colData_dictionary = participants_variable_dictionary,
       crf_plates_description = crf_plates_dictionary,
       crf_data_raw = crf_raw,
-      crf_data_clean = crf_clean, 
-      participant_crfs_merged = participant_crfs_merged,
-      visits_crfs_merged = visits_crfs_merged
+      crf_data_clean = crf_clean #, 
+      # participant_crfs_merged = participant_crfs_merged,
+      # visits_crfs_merged = visits_crfs_merged
     )
   )
 
@@ -492,7 +510,7 @@ mae
 ```{r}
 
 mae_sample_map <- 
-  mae@sampleMap |> as_tibble() |> filter(assay %in% assay_list$mae_assay_name) |>
+  mae@sampleMap |> as_tibble() |> dplyr::filter(assay %in% assay_list$mae_assay_name) |>
   select(uid = primary, assay) |> 
   arrange(uid) |> 
   dplyr::left_join(assay_list |> dplyr::rename(assay = mae_assay_name), by = join_by(assay)) |> 
@@ -511,7 +529,7 @@ All samples
 #| fig-width: 12
 
 mae_sample_map |> 
-  filter(!is.na(assay)) |> 
+  dplyr::filter(!is.na(assay)) |> 
   group_by(uid) |> mutate(n = n()) |> ungroup() |> 
   mutate(uid = uid |> fct_reorder(-n)) |>
   ggplot() +
@@ -538,12 +556,15 @@ Longitudinal availability for all visits
 #| fig-width: 12
 
 mae_sample_map |> 
-  filter(!is.na(assay)) |> 
+  dplyr::filter(!is.na(assay)) |> 
   # filter(visit_code %in% c("0000", seq(1000, 1900, by = 100), "2120")) |> 
   ggplot() +
   aes(x = assay_label, y = pid, fill = assay_label) +
   geom_tile() +
-  facet_grid(ifelse(randomized, "Randomized", "Not randomized") + location ~ visit_code, scales = "free_y", space = "free_y") + # sample_category
+  facet_grid(
+    ifelse(randomized, "Randomized", "Not randomized") + location ~ visit_code, 
+    scales = "free_y", space = "free_y"
+    ) + # sample_category
   scale_y_discrete("Participants IDs") + #, breaks = "NULL")  +
   xlab("") +
   scale_fill_brewer("Assay", type = "qual", palette = 7) + # 3
@@ -562,8 +583,8 @@ For the weekly visits
 #| fig-width: 12
 
 mae_sample_map |> 
-  filter(!is.na(assay)) |> 
-  filter(visit_type == "Clinic") |> 
+  dplyr::filter(!is.na(assay)) |> 
+  dplyr::filter(visit_type == "Clinic") |> 
   ggplot() +
   aes(x = assay_label, y = pid, fill = assay_label) +
   geom_tile() +

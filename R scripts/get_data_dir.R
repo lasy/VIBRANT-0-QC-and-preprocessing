@@ -1,4 +1,11 @@
-get_data_dir <- function(data_source = "simulated"){
+get_vibrant_data_dir <- function(){
+  str_c(get_VIBRANT_Dropbox_dir(), "90_VIBRANT_consolidated_data/")
+}
+
+
+
+
+get_data_dir <- function(data_source = "real"){
   
   if (str_detect(getwd(), "laurasymul"))
     data_dir <- "/Users/laurasymul/OneDrive - UCL/Academia/Research/VIBRANT data UCLouvain/"

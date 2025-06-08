@@ -2247,6 +2247,7 @@ factoextra::fviz_eig(pca_res, ncp = 48) +
   ylim(c(0, 20))
 
 ```
+
 ```{r}
 #| fig-height: 6
 #| fig-width: 18
