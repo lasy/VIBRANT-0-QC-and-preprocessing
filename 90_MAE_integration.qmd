@@ -45,7 +45,7 @@ theme_set(theme_light())
 
 crf_data_path <- fs::dir_ls(
   "/Users/laurasymul/OneDrive - UCL/Academia/Research/VIBRANT clinical data UCLouvain/Data processed/"
-) |> sort(decreasing = TRUE) |> str_subset("2025-05-26")
+) |> sort(decreasing = TRUE) |> str_subset("2025-05-29")
 
 # crf_data_path <- fs::dir_ls(
 #   "/Users/lvermeren/OneDrive - UCL/VIBRANT clinical data/Data processed/") |> sort(decreasing = TRUE) |> magrittr::extract(1) #LV
@@ -114,7 +114,6 @@ visits <-
 
 # Assays: loading the `SummarizedExperiment` objects 
 
-> TODO: a function that checks the "conformity" of the `SE` objects (e.g. `uid`, `colnames`, `sample_type`, `control_type`, `crf_match`) 
 
 ```{r}
 
@@ -130,6 +129,7 @@ se_files <- fs::dir_ls(data_dir, regexp = "se_.*\\.rds$") |> sort(decreasing = T
 
 mg_file <- se_files[grepl("mg", se_files)][1]
 se_mg <- readRDS(mg_file)
+se_mg <- check_se(se_mg)
 se_mg
 
 ```
@@ -140,6 +140,7 @@ se_mg
 
 qPCR_file <- se_files[grepl("pcr_agg", se_files)][1]
 se_qPRC <- readRDS(qPCR_file)
+se_qPRC <- check_se(se_qPRC)
 se_qPRC
 
 ```
@@ -150,6 +151,7 @@ se_qPRC
 
 amplicon_file <- se_files[grepl("16S_agg", se_files)][1]
 se_16S <- readRDS(amplicon_file)
+se_16S <- check_se(se_16S)
 se_16S
 
 ```
@@ -162,6 +164,7 @@ se_16S
 
 luminex_file <- se_files[grepl("luminex_agg", se_files)][1]
 se_luminex <- readRDS(luminex_file)
+se_luminex <- check_se(se_luminex)
 se_luminex
 
 ```
@@ -174,6 +177,7 @@ se_luminex
 
 flow_file <- se_files[grepl("flow", se_files)][1]
 se_flow <- readRDS(flow_file)
+se_flow <- check_se(se_flow)
 se_flow
 
 ```
@@ -605,6 +609,23 @@ mae_sample_map |>
 ```
 
 > There is one US participant with the termination `visit_code` for their 16S data, but it should be changed to `1700`.
+
+
+# Fixing visit codes and visit days
+
+> TODO
+
+In this section we perform a few fixes for mismatched `visit_code`s, `study_day`s, and when needed, associated `uid`s.
+
+
+
+```{r}
+
+
+
+```
+
+
 
 
 # Subsetting and saving the `MultiAssayExperiment` objects

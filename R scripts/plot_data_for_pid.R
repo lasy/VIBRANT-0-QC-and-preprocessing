@@ -2,44 +2,47 @@
 plot_data_for_pid <- function(selected_pid, mae_sub){
   
   mae_selected_pid <- mae_sub[, mae_sub$pid == selected_pid]
+  coldata <- mae_selected_pid@colData |> as_tibble()
   
   #all_visits <- tibble(visit_code = mae_selected_pid$visit_code)
-  all_visits <- mae_sub$visit_code |> unique()  |> sort() |> as_tibble() |> rename(visit_code = value)
+  all_visits <- mae_sub$visit_code |> unique()  |> sort() |> as_tibble() |> dplyr::rename(visit_code = value)
   
   mg_ <- 
     mae_selected_pid[["mg"]] |> 
     as_tibble() |> 
     group_by(.feature) |> 
-    mutate(max_rel_ab = max(rel_abs_bact)) |> 
+    mutate(max_rel_ab = max(rel_ab)) |> 
     ungroup() |> 
     arrange(LBP, ifelse(!is.na(LBP),.feature, 1), max_rel_ab * !is.na(LBP)) |>
     mutate(.feature = .feature |> fct_inorder()) |> 
-    filter(as.numeric(.feature) <= 25) |> 
+    dplyr::filter(as.numeric(.feature) <= 25) |> 
+    dplyr::left_join(coldata |> select(uid, pid, visit_code), by = join_by(uid)) |> 
     dplyr::full_join(all_visits, by = join_by(visit_code))
   
   
   ampl_ <- 
     mae_selected_pid[["amplicon"]] |> 
     as_tibble() |> 
-    dplyr::rename(.feature = feature) |> # CHECK WHY not .feature
     group_by(.feature) |>  
     mutate(max_rel_ab = max(rel_ab)) |> 
     ungroup() |> 
     mutate(.feature = .feature |> fct_inorder()) |> 
-    filter(str_detect(.feature, "crispatus") | as.numeric(.feature) <= 10) |> 
+    dplyr::filter(str_detect(.feature, "crispatus") | as.numeric(.feature) <= 10) |> 
+    dplyr::left_join(coldata |> select(uid, pid, visit_code), by = join_by(uid)) |> 
     dplyr::full_join(all_visits, by = join_by(visit_code))
   
   qPCR_ <-
     mae_selected_pid[["qPCR"]] |> 
-    as_tibble()
+    as_tibble() |> 
+    dplyr::left_join(coldata |> select(uid, pid, visit_code), by = join_by(uid)) 
   
   if (any(qPCR_$copies_per_swab_med[!is.na(qPCR_$LBP)] > 0, na.rm = TRUE)) {
     qPCR_ <- 
       qPCR_ |> 
       bind_rows(
         qPCR_ |> 
-          filter(!is.na(LBP)) |> 
-          group_by(.sample, uid, pid, visit_code, location) |> 
+          dplyr::filter(!is.na(LBP)) |> 
+          group_by(.sample, uid, pid, visit_code) |> 
           summarise(
             LBP = NA,
             copies_per_swab_med = sum(copies_per_swab_med, na.rm = TRUE),
@@ -64,7 +67,7 @@ plot_data_for_pid <- function(selected_pid, mae_sub){
   g_mg <- 
     mg_ |> 
     ggplot() +
-    aes(x = visit_code, y = rel_abs_bact, fill = taxon_label) +
+    aes(x = visit_code, y = rel_ab, fill = taxon_label) +
     geom_col() +
     scale_y_continuous(
       "Relative abundance\n(bacterial content only)", 

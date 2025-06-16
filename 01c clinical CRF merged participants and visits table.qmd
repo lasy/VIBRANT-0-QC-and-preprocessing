@@ -1,0 +1,924 @@
+---
+title: "VIBRANT clinical data"
+author: Laura Vermeren, Lara Wautier, Céline Bugli, Laura Symul
+date: today
+format: 
+  html:
+    code-fold: true
+    toc: true
+    toc-location: left
+    theme: journal
+    embed-resources: true
+execute:
+  cache: false
+project:
+  execute-dir: project
+editor: 
+  markdown: 
+    wrap: 80
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r}
+#| warning: false
+#| include: false
+
+library(tidyverse)
+library(gt)
+library(labelled)
+library(gtsummary)
+tmp <- fs::dir_map("R scripts/", source) 
+tmp <- fs::dir_map("../VIBRANT-99-utils/R/", source)
+rm(tmp)
+theme_set(theme_bw())
+
+```
+
+The purpose of this document is to create
+
+- a `participant_crfs_merged` table: a table with one row per `pid` with "harmonized" data for CRFs that were supposed to be only filled once.
+
+- `visits_crfs_merged` table: a table with one row per `pid` and `visit_code` with "harmonized" data for CRFs that were supposed to be filled at several visits.
+
+
+# `participant_crfs_merged` table
+
+```{r}
+
+data_dir <- get_data_dir() |> str_c("01 Preprocessed and QCed/")
+
+crf_clean_file <- data_dir |> fs::dir_ls() |> str_subset("01_crf_clean") |> sort(decreasing = TRUE) |> magrittr::extract(1)
+load(crf_clean_file, verbose = TRUE)
+crf_clean |> names()
+rm(crf_clean_file)
+
+```
+
+
+
+## Correction of crfs with participants with multiple entries
+
+List of the expected "participants crfs" according to the planning 
+
+```{r}
+
+participants_crf_name <- 
+  c("crf1", "crf101", "crf2", "crf102", 
+    "crf5", 
+    "crf6", "crf7", 
+    "crf8", "crf9", "crf10", "crf11", "crf12", "crf13", "crf15", 
+    "crf22", "crf23","crf24", "crf25", "crf28", 
+    "crf43", "crf44","crf46"
+    )
+
+```
+
+We create a function which, for each crf in the participants table, compares the rows with a duplicate pid. 
+
+If the rows are identical (*i.e.*, they have the same values for all columns except `dfseq` and `study_day`), we keep only one row. If the lines are not identical, they are left in the crfs and will be examined manually later.
+The `dfseq` and `study_day` variables are removed from these crfs.
+
+```{r}
+
+process_crf_duplicates <- function(crf_clean, participants_crf_name) {
+
+  participants_crf_filtered <- 
+    crf_clean[names(crf_clean) %in% participants_crf_name]
+  
+  for (crf_name in participants_crf_name) {
+    data <- crf_clean[[crf_name]]
+    
+    dup_pid <- 
+      data |> 
+      count(pid) |> 
+      filter(n > 1) |> 
+      pull(pid)
+    
+    if(!("study_day" %in% names(data))) {
+      data <- 
+        data |> 
+        mutate(study_day = NA_integer_)
+    }
+    if(!("dfseq" %in% names(data))) {
+      data <- 
+        data |> 
+        mutate(dfseq = NA_integer_)
+    }
+    
+    if (length(dup_pid) > 0) {
+      data <- 
+        data |> 
+        distinct(across(-c(dfseq, study_day)), .keep_all = TRUE)
+      
+      participants_crf_filtered[[crf_name]] <- data
+        
+    } else {
+      participants_crf_filtered[[crf_name]] <- data #|> select(-c(dfseq, study_day))
+    }
+    
+}
+
+  return(participants_crf_filtered)
+}
+
+participants_crf <- process_crf_duplicates(crf_clean, participants_crf_name)
+
+```
+
+
+The crfs that still have double pids after processing are shown below.
+
+```{r}
+
+for (crf_name in participants_crf_name) {
+  data <- participants_crf[[crf_name]]
+  
+  dup_pid <- 
+    data |> 
+    count(pid) |> 
+    filter(n > 1) |> 
+    pull(pid)
+  
+  if (length(dup_pid) > 0) {
+    print(crf_name)
+  }
+}
+
+```
+
+We will examine the lines with a double pid below and make a decision for each of these lines.
+
+### crf1 
+
+For this CRF, we keep the first observation for each participant.
+
+```{r}
+
+participants_crf[["crf1"]] <- 
+  participants_crf[["crf1"]] |> 
+  mutate(site = "MGH")
+
+pid_temp <- participants_crf[["crf1"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+
+participants_crf[["crf1"]] |> 
+  filter(pid %in% pid_temp)
+
+participants_crf[["crf1"]] <-
+  participants_crf[["crf1"]] |>
+  group_by(pid) |>
+  arrange(dfseq) |> 
+  slice_head(n = 1) |> 
+  ungroup() |> 
+  mutate(
+    site = "MGH"
+  )
+
+```
+
+
+### crf101
+
+We keep the highest value for `edu` and `income_sources` (i.e. the most complete).
+All the other variables are kept as is.
+
+Note : participant 200156 is the only one not to have the shortest value of income resource included in the largest value, so we correct it manually.
+
+```{r}
+# crf101
+
+pid_temp <- participants_crf[["crf101"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+
+participants_crf[["crf101"]] |> 
+  filter(pid %in% pid_temp)
+#30 participants with double pid
+
+education_levels <- c("Primary school", "Secondary school", "Tertiary education")
+
+participants_crf[["crf101"]] <- 
+  participants_crf[["crf101"]] |>
+  mutate(
+    income_sources = case_when(
+      pid == "200156" ~ "employed_full_time, family_support, husband_provides, social_grants", 
+      TRUE ~ income_sources
+    )
+  ) |> 
+  group_by(pid) |>
+  summarise(
+    across(-c(edu, income_sources), ~ first(.x)),
+    edu = edu[which.max(match(edu, education_levels))],
+
+    income_sources = income_sources[which.max(str_count(income_sources, ",") + 1)],
+    
+    .groups = "drop"
+  ) |> 
+  mutate(
+    site = "CAP"
+  )
+
+rm(pid_temp, education_levels)
+
+```
+ 
+We combine the demographics data from `crf1` and `crf101` into a single table called `crf1_101`.
+
+```{r}
+
+participants_crf[["crf1_101"]] <- bind_rows(
+  participants_crf[["crf1"]],
+  participants_crf[["crf101"]]
+)
+
+```
+
+We check the number of participants with duplicated pid values in the crf1_101 table. Some participants appear twice, with one of the entries containing no data. Therefore, we retain only the rows that contain actual data.
+
+```{r}
+
+pid_temp <- participants_crf[["crf1_101"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+
+participants_crf[["crf1_101"]] |> 
+  filter(pid %in% pid_temp) |> 
+  arrange(pid)
+
+participants_crf[["crf1_101"]] <-
+  participants_crf[["crf1_101"]] |>
+  filter(if_any(-c(pid, dfseq, site), ~ !is.na(.))) 
+
+#remove crf1 and 101 from the participant_crf
+participants_crf[["crf1"]] <- NULL
+participants_crf[["crf101"]] <- NULL
+
+```
+
+### crf2
+ 
+For double entries, if a participant ever reported to worry for any the "worry" variables, then we keep the "Checked" value (worst case scenario).
+
+
+```{r}
+# crf2 
+
+pid_temp <- participants_crf[["crf2"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+
+participants_crf[["crf2"]] |> 
+  filter(pid %in% pid_temp)
+# 6 participants with double pid
+
+# if worry was "checked" and "uncheked" keep the worry "checked" 
+worry_cols <- names(participants_crf[["crf2"]])[str_detect(names(participants_crf[["crf2"]]), "^worry_")]
+other_cols <- setdiff(names(participants_crf[["crf2"]]), c("pid", worry_cols))
+
+participants_crf[["crf2"]] <- 
+  participants_crf[["crf2"]] |>
+  group_by(pid) |>
+  summarise(
+    across(all_of(other_cols), ~ first(.x)),
+    across(all_of(worry_cols), ~ if ("Checked" %in% .x) "Checked" else "Unchecked"),
+    .groups = "drop"
+  ) 
+
+rm(pid_temp, worry_cols, other_cols)
+
+```
+
+
+### crf102
+
+Response for the `monthly_gross_income` is incoherent between the two visits (see table below).
+
+We decide to keep the most recent visit.
+
+```{r}
+#crf102
+
+pid_temp <- participants_crf[["crf102"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+
+participants_crf[["crf102"]] |> 
+  filter(pid %in% pid_temp) |> 
+  group_by(pid) |>
+  gt(row_group_as_column = TRUE)
+
+participants_crf[["crf102"]] <-
+  participants_crf[["crf102"]] |>
+  group_by(pid) |>
+  arrange(-dfseq) |> 
+  slice_head(n = 1) |> 
+  ungroup()
+
+rm(pid_temp)
+
+```
+
+We combine the socio demographics data from `crf2` and `crf102` into a single table called `crf2_102`.
+
+```{r}
+
+participants_crf[["crf2_102"]] <- bind_rows(
+  participants_crf[["crf2"]],
+  participants_crf[["crf102"]]
+)
+
+```
+
+We check the number of participants with duplicated pid values in the crf2_102 table. Some participants from MGH appear twice, with one of the entries containing no data. Therefore, we retain only the rows that contain actual data for those participants. Some participants from CAP appear twice, with one of the entries containing no data for the `mothly_gross_income`. Therefore, we retain only the rows that contain the annual gross income for those participants.
+
+```{r}
+
+pid_temp <- participants_crf[["crf2_102"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+
+participants_crf[["crf2_102"]] |>
+  filter(pid %in% pid_temp) |> 
+  arrange(pid) #|> 
+  #View()
+
+participants_crf[["crf2_102"]] <-
+  participants_crf[["crf2_102"]] |>
+  filter(if_any(-c(pid, dfseq), ~ !is.na(.))) 
+
+crf_temp <- 
+  participants_crf[["crf2_102"]] |>
+  filter(pid %in% pid_temp) |>
+  filter(!is.na(monthly_gross_income))
+
+participants_crf[["crf2_102"]] <-
+  participants_crf[["crf2_102"]] |>
+  filter(!(pid %in% crf_temp$pid)) |> 
+  bind_rows(crf_temp)
+
+rm(pid_temp, crf_temp)
+
+# Remove crf2 and 102 from the participant_crf
+participants_crf[["crf2"]] <- NULL
+participants_crf[["crf102"]] <- NULL
+
+```
+
+
+### crf6
+
+We keep the values of the most recent visit.
+
+```{r}
+# crf6
+
+pid_temp <- participants_crf[["crf6"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+pid_temp
+
+participants_crf[["crf6"]] |> 
+  filter(pid %in% pid_temp)
+#78 participants with double pid
+
+participants_crf[["crf6"]] <- 
+  participants_crf[["crf6"]] |>
+  group_by(pid) |>
+  arrange(-study_day) |> 
+  slice_head(n = 1) |> 
+  ungroup() |> 
+  rename(
+    age_at_consent = age
+  )
+
+rm(pid_temp)
+
+```
+
+
+### crf7
+
+We keep the values of the most recent visit.
+
+```{r}
+# crf7
+
+pid_temp <- participants_crf[["crf7"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+
+participants_crf[["crf7"]] |>
+  filter(pid %in% pid_temp)
+
+participants_crf[["crf7"]] <-
+  participants_crf[["crf7"]] |>
+  group_by(pid) |>
+  arrange(-study_day) |> 
+  slice_head(n = 1) |> 
+  ungroup()
+
+rm(pid_temp)
+
+```
+
+
+### crf8
+
+We keep the values of the most recent visit.
+
+```{r}
+
+pid_temp <- participants_crf[["crf8"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+pid_temp
+
+participants_crf[["crf8"]] |> 
+  filter(pid %in% pid_temp) |> 
+  group_by(pid) |>
+  gt(row_group_as_column = TRUE)
+
+participants_crf[["crf8"]] <-
+  participants_crf[["crf8"]] |>
+  group_by(pid) |>
+  arrange(-study_day) |> 
+  slice_head(n = 1) |> 
+  ungroup()
+
+rm(pid_temp)
+
+```
+
+
+
+### crf9
+
+Only one participant is duplicated. We decide to keep the most recent observation.
+
+```{r}
+
+pid_temp <- 
+  participants_crf[["crf9"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+
+pid_temp
+
+participants_crf[["crf9"]] |> 
+  filter(pid %in% pid_temp)
+
+participants_crf[["crf9"]] <- 
+  participants_crf[["crf9"]] |>
+  group_by(pid) |>
+  arrange(-study_day) |>
+  slice_head(n = 1) |>
+  ungroup()
+
+rm(pid_temp)
+
+```
+
+
+### crf10
+
+We keep the most recent visit.  
+
+```{r}
+
+pid_temp <- 
+  participants_crf[["crf10"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+pid_temp
+
+participants_crf[["crf10"]] |> 
+  filter(pid %in% pid_temp) |> 
+  group_by(pid) |>
+  gt(row_group_as_column = TRUE)
+
+participants_crf[["crf10"]] <- 
+  participants_crf[["crf10"]]|> 
+  group_by(pid) |>
+  arrange(-study_day) |>
+  slice_head(n = 1) |>
+  ungroup()
+
+rm(pid_temp)
+```
+
+
+
+### crf11
+
+We keep the most recent visit.
+
+```{r}
+
+pid_temp <- participants_crf[["crf11"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+pid_temp
+
+participants_crf[["crf11"]] |> 
+  filter(pid %in% pid_temp)
+
+participants_crf[["crf11"]] <-
+  participants_crf[["crf11"]] |>
+  group_by(pid) |>
+  arrange(-study_day) |>
+  slice_head(n = 1) |>
+  ungroup()
+
+rm(pid_temp)
+
+```
+
+
+
+### crf12
+
+We keep the most recent visit. 
+
+```{r}
+
+pid_temp <- participants_crf[["crf12"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+pid_temp
+
+participants_crf[["crf12"]] |> 
+  filter(pid %in% pid_temp)
+
+participants_crf[["crf12"]] <- 
+  participants_crf[["crf12"]] |>
+  group_by(pid) |>
+  arrange(-dfseq) |> 
+  slice_head(n = 1) |> 
+  ungroup()
+
+rm(pid_temp)
+
+```
+
+
+### crf15
+
+Only one participant is duplicated. We combine the response for the two variable :
+- `pap_smear_results` we keep *Negative for intraepithelial lesion or cancer (malignancy)*
+- `blood_type` we keep *AB positive (AB+)*
+
+```{r}
+
+pid_temp <- participants_crf[["crf15"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+pid_temp
+
+participants_crf[["crf15"]] |> 
+  filter(pid %in% pid_temp)
+
+participants_crf[["crf15"]] <-
+  participants_crf[["crf15"]] |> 
+  mutate(
+    pap_smear_results = case_when(
+      pid == 200085 ~ "Negative for intraepithelial lesion or cancer (malignancy)",
+      TRUE ~ pap_smear_results
+    ),
+    blood_type = case_when(
+      pid == 200085 ~ "AB positive (AB+)",
+      TRUE ~ blood_type
+    )
+  ) |> 
+  group_by(pid) |> 
+  arrange(-dfseq) |>
+  slice_head(n = 1) |>
+  ungroup()
+  
+
+```
+
+
+
+### crf22 (Metrodanizole exposure)
+
+Data are used to create the exposure table. 
+
+Some participants came twice, either because they were in the overlap arm, or because they had not completed treatment at the first visit.
+
+We keep the second observation for these participants.
+
+We rename the variable `prescription_container` to `prescription_container_metronidazole`, `tablets_remain` to `tablets_remain_metronidazole` to avoid conflict with the data from CRF23 (study product exposure).
+
+```{r}
+
+pid_temp <- participants_crf[["crf22"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+pid_temp
+
+participants_crf[["crf22"]] |> 
+  filter(pid %in% pid_temp)
+
+participants_crf[["crf22"]] <-
+  participants_crf[["crf22"]] |>
+  group_by(pid) |>
+  arrange(-study_day) |>
+  slice_head(n = 1) |>
+  ungroup() |> 
+  rename(
+    prescription_container_metronidazole = prescription_container, 
+    tablets_remain_metronidazole = tablets_remain,
+    #comments_metronidazole = comments
+  )
+  
+```
+
+
+### crf23 (product exposure)
+
+Data are used to create the exposure table. 
+Some participants came twice because they were in the overlap arm or because they don't finished the treatment at the first visit.
+
+So we keep the second observation for these participants.
+
+```{r}
+
+pid_temp <- participants_crf[["crf23"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+pid_temp
+
+participants_crf[["crf23"]] |> 
+  filter(pid %in% pid_temp)
+
+participants_crf[["crf23"]] <-
+  participants_crf[["crf23"]] |>
+  group_by(pid) |>
+  arrange(-study_day) |>
+  slice_head(n = 1) |>
+  ungroup() |> 
+  rename(
+    prescription_container_study_product = prescription_container, 
+    tablets_remain_study_product = tablets_remain,
+    #comments_study_product = comments
+  )
+
+```
+
+
+
+### crf24
+
+We keep the most recent visit.
+
+```{r}
+
+pid_temp <- participants_crf[["crf24"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+pid_temp
+
+participants_crf[["crf24"]] |> 
+  filter(pid %in% pid_temp)
+
+participants_crf[["crf24"]] <-
+  participants_crf[["crf24"]] |>
+  group_by(pid) |>
+  arrange(-study_day) |> 
+  slice_head(n = 1) |> 
+  ungroup()
+
+```
+
+
+### crf25
+
+We keep the most recent visit.
+
+```{r}
+
+pid_temp <- participants_crf[["crf25"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+
+participants_crf[["crf25"]] |>
+  filter(pid %in% pid_temp)
+
+participants_crf[["crf25"]] <-
+  participants_crf[["crf25"]] |>
+  group_by(pid) |>
+  arrange(-study_day) |> 
+  slice_head(n = 1) |> 
+  ungroup()
+
+
+```
+
+### crf28
+
+We keep the most recent visit.
+
+```{r}
+
+pid_temp <- participants_crf[["crf28"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+pid_temp
+
+participants_crf[["crf28"]] |> 
+  filter(pid %in% pid_temp)
+
+participants_crf[["crf28"]] <-
+  participants_crf[["crf28"]] |>
+  group_by(pid) |>
+  arrange(-study_day) |> 
+  slice_head(n = 1) |> 
+  ungroup()
+
+```
+
+
+### crf46
+
+We keep the first observation for these participants since the second observation is not complete.
+
+```{r}
+
+pid_temp <- participants_crf[["crf46"]] |> 
+  count(pid) |> 
+  filter(n > 1) |> 
+  pull(pid)
+
+participants_crf[["crf46"]] |>
+  filter(pid %in% pid_temp)
+
+participants_crf[["crf46"]] <-
+  participants_crf[["crf46"]] |>
+  group_by(pid) |>
+  arrange(dfseq) |> 
+  slice_head(n = 1) |> 
+  ungroup()
+
+
+```
+
+
+
+## Making the `participant_crfs_merged` table
+
+We check that the number of repeated `pid` is null. 
+
+```{r}
+
+table_p <- map_df(
+  names(participants_crf),
+  function(participants_crf_name) {
+    df <- participants_crf[[participants_crf_name]]
+    
+    if (!"pid" %in% names(df)) {
+      return(tibble(crf = participants_crf_name, n_multi_pid = NA_integer_))
+    }
+
+    n <- df |> 
+      count(pid) |> 
+      filter(n > 1) |> 
+      nrow()
+
+    tibble(crf = participants_crf_name, n_multi_pid = n)
+  }
+)
+
+table_p 
+
+```
+
+
+```{r}
+# Select crf with 0 multi pids
+participants_crf_name <- 
+  table_p |> 
+  filter(n_multi_pid == 0) |> 
+  pull(crf)
+
+# Creating the participant table
+
+participant_crfs_merged <-
+  participants_crf[names(participants_crf) %in% participants_crf_name] |> 
+  map(
+    function(df) {
+      if ("dfseq" %in% names(df)) {df |> select(-any_of(c("uid", "visit_code","dfseq", "study_day", "vdate_fixed")))
+      } else {df}
+    }
+  ) |>
+  reduce(full_join, by = join_by(pid))
+  
+participant_crfs_merged |> colnames()
+```
+
+
+# `visits_crfs_merged` table
+
+Visit CRFs refer to those CRFs not present in the participants CRF list.
+
+We check that each of these CRFs includes both the study_day and dfseq variables. Any CRF that does not meet this requirement is excluded from the visit CRF list.
+
+```{r}
+
+visits_crf_name <- 
+  setdiff(names(crf_clean[!names(crf_clean) %in% c("crf1", "crf101", "crf2", "crf102")]),
+          participants_crf_name)
+
+#crf in visits_crf name but with no study_day variable
+no_studyday <- crf_clean[names(crf_clean) %in% visits_crf_name] |>
+  keep(~ !"study_day" %in% names(.x)) |>
+  names()
+no_studyday
+
+#crf in visits_crf name but with no dfseq variable
+no_dfseq <- crf_clean[names(crf_clean) %in% visits_crf_name] |>
+  keep(~ !"dfseq" %in% names(.x)) |>
+  names()
+no_dfseq
+
+```
+
+
+```{r}
+
+visits_crf_name <- setdiff(visits_crf_name, no_dfseq)
+
+```
+
+
+```{r}
+
+# first join crf that have dfseq and study_day
+# visits_crfs_merged <- 
+#   crf_clean[setdiff(visits_crf_name, no_studyday)] |> 
+#   reduce(full_join, by = join_by(uid, pid, visit_code, dfseq, study_day))
+
+visits_crfs_merged <-
+  crf_clean[setdiff(visits_crf_name, no_studyday)] |> 
+  map(
+    function(df) {
+      df |> select(-any_of(c("uid", "vdate_fixed")))
+    }
+  ) |>
+  reduce(full_join, by = join_by(pid, visit_code, dfseq, study_day))
+  
+# Then add crf with no study_day
+
+visits_crfs_merged <- 
+  visits_crfs_merged |> 
+  full_join(
+    crf_clean[setdiff(no_studyday, no_dfseq)] |> 
+      map(
+        function(df) {
+          df |> select(-any_of(c("uid")))
+        }
+      ) |>
+      reduce(full_join, by = join_by(pid, visit_code, dfseq)),
+    by = join_by(pid, visit_code, dfseq)
+  )
+
+
+visits_crfs_merged |> colnames()
+
+```
+
+
+# Exports
+
+
+```{r}
+
+dir <- get_data_dir() |> str_c("01 Preprocessed and QCed/")
+
+save(participant_crfs_merged, file = str_c(dir, "01_participant_crfs_merged_", today() |> str_replace_all("-",""), ".Rdata"))
+save(visits_crfs_merged, file = str_c(dir, "01_visits_crfs_merged_", today() |> str_replace_all("-",""), ".Rdata"))
+
+```
+

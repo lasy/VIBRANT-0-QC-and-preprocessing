@@ -1,8 +1,22 @@
-get_vibrant_data_dir <- function(){
-  str_c(get_VIBRANT_Dropbox_dir(), "90_VIBRANT_consolidated_data/")
+
+get_clinical_data_dir <- function(){
+  
+  if (str_detect(getwd(), "laurasymul"))
+    data_dir <- "/Users/laurasymul/OneDrive - UCL/Academia/Research/VIBRANT clinical data UCLouvain/"
+  else if (str_detect(getwd(), "vermeren"))
+    data_dir <- "/Users/lvermeren/OneDrive - UCL/VIBRANT clinical data UCLouvain/"
+  else
+    stop(
+      str_c(
+        "You need to specify the path to the data directory in `R/get_data_dir.R`.\n",
+        "Note that you may not have access to the raw clinical data.\n",
+        "Please contact Caroline Mitchell and Laura Symul to request access."
+      )
+    )
+  
+  data_dir <- str_c(data_dir, "Data/")
+  data_dir
 }
-
-
 
 
 get_data_dir <- function(data_source = "real"){
@@ -26,9 +40,7 @@ get_data_dir <- function(data_source = "real"){
   data_dir
 }
 
-
-
-get_output_dir <- function(data_source = "simulated"){
+get_output_dir <- function(data_source = "real"){
   
   if (str_detect(getwd(), "laurasymul"))
     output_dir <- "/Users/laurasymul/OneDrive - UCL/Academia/Research/VIBRANT data UCLouvain/"
@@ -47,6 +59,11 @@ get_output_dir <- function(data_source = "simulated"){
     stop("data_source must be either 'simulated' or 'real'")
   
   output_dir
+}
+
+
+get_vibrant_data_dir <- function(){
+  str_c(get_VIBRANT_Dropbox_dir(), "90_VIBRANT_consolidated_data/")
 }
 
 

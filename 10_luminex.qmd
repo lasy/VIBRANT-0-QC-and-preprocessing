@@ -263,9 +263,6 @@ raw <-
 
 There were two "Softcup blanks" from the US - we identify those with "`XX`" in their sample name. We flag them as such.
 
-:::callout-note
-Not clear what "softcup blanks" are - maybe worth checking with the team again.
-:::
 
 ```{r}
 
@@ -547,12 +544,7 @@ matched |>
 
 For the 3 participants that had Luminex data not expected according to CRF35, it looks like the visit was miscoded (11 or 1 instead of 10, 1000, or 2120). 
 
-There remain two participants for whom CRF35 claims that softcups were collected but for whom we do not have any data.
-
-:::callout-caution
-To be checked with the team.
-:::
-
+There remains two participants for whom CRF35 claims that softcups were collected but for whom we do not have any data.
 
 ```{r}
 
@@ -569,7 +561,6 @@ matched |>
 
 
 ### Harmonization of `pid`, `visit_code`, and creation of the VIBRANT cross-assay `uid`
-
 
 
 ```{r}
@@ -1360,11 +1351,10 @@ There is no "Bead count" sheet in the excel file for plate 2 of batch 1
 
 
 :::callout-caution
-One well appear to have a very low bead count; we will flag this sample as "failed" in the section @sec-filtering below. 
+One well appears to have a very low bead count; we will flag this sample as "failed" in the section @sec-filtering below. 
 :::
 
 All other wells have over 1000 total bead counts.
-
 
 
 ## Total fluorescence intensity per well
