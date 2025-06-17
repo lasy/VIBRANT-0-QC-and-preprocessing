@@ -21,6 +21,7 @@ editor: source
 
 ```{r}
 #| warning: false
+#| cache: false
 
 library(tidyverse)
 library(magrittr)
@@ -31,7 +32,8 @@ library(tidySummarizedExperiment)
 library(MultiAssayExperiment)
 
 tmp <- fs::dir_map("R scripts/", source)
-
+tmp <- fs::dir_map("../VIBRANT-99-utils/R/", source)
+rm(tmp)
 theme_set(theme_light())
 ```
 
@@ -39,13 +41,9 @@ theme_set(theme_light())
 
 ```{r}
 
-data_source <- "real"
 mae_files <- 
   fs::dir_ls(
-    str_c(
-      get_data_dir(data_source = data_source),  
-      "02 MAEs/"
-    ),
+    get_02_output_dir(),
     regexp = "mae_full_.*\\.rds$"
   ) |> 
   sort(decreasing = TRUE) |>
@@ -72,31 +70,31 @@ tmp <-
   dplyr::inner_join(
     mae[["mg"]] |> 
       as_tibble() |>
-      filter(!is.na(LBP)) |> 
-      filter(!is.na(rel_abs_bact)) |> 
-      select(.feature, .sample, rel_abs_bact, sample_type) |> 
+      dplyr::filter(!is.na(LBP)) |> 
+      dplyr::filter(!is.na(rel_ab)) |> 
+      select(.feature, .sample, rel_ab, sample_type) |> 
       dplyr::rename(
-        mg_rel_ab_bact = rel_abs_bact
+        mg_rel_ab = rel_ab
       ),
     mae[["qPCR"]] |>
       as_tibble() |>
-      filter(!is.na(LBP)) |> 
+      dplyr::filter(!is.na(LBP)) |> 
       select(.feature, .sample, copies_per_swab_med, copies_per_swab_cv, strain_group_qpcr),
     by = join_by(.feature, .sample)
   )
 
 tmp |> 
   ggplot() +
-  aes(x = mg_rel_ab_bact, y = copies_per_swab_med, color = sample_type) +
+  aes(x = mg_rel_ab, y = copies_per_swab_med, color = sample_type) +
   geom_point(alpha = 0.3, size = 1) +
   facet_wrap(~ strain_group_qpcr + .feature) +
   scale_y_log10() +
   scale_x_log10()
 
 tmp |> 
-  dplyr::count(.feature, mg_rel_ab_bact > 0, copies_per_swab_med > 0) |> 
+  dplyr::count(.feature, mg_rel_ab > 0, copies_per_swab_med > 0) |> 
   ggplot() +
-  aes(x = `mg_rel_ab_bact > 0`, y = `copies_per_swab_med > 0`) +
+  aes(x = `mg_rel_ab > 0`, y = `copies_per_swab_med > 0`) +
   geom_tile(aes(fill = n)) +
   geom_text(aes(label = n)) +
   scale_fill_gradient(low = "white", high = "dodgerblue3") +
@@ -104,9 +102,9 @@ tmp |>
 
 
 tmp |> 
-  dplyr::count(.feature, mg_rel_ab_bact > 0, copies_per_swab_med > 1e+05) |> 
+  dplyr::count(.feature, mg_rel_ab > 0, copies_per_swab_med > 1e+05) |> 
   ggplot() +
-  aes(x = `mg_rel_ab_bact > 0`, y = `copies_per_swab_med > 1e+05`) +
+  aes(x = `mg_rel_ab > 0`, y = `copies_per_swab_med > 1e+05`) +
   geom_tile(aes(fill = n)) +
   geom_text(aes(label = n)) +
   scale_fill_gradient(low = "white", high = "dodgerblue3") +
@@ -114,9 +112,9 @@ tmp |>
 
 
 tmp |> 
-  dplyr::count(.feature, mg_rel_ab_bact > 0, copies_per_swab_med > 10000) |> 
+  dplyr::count(.feature, mg_rel_ab > 0, copies_per_swab_med > 10000) |> 
   ggplot() +
-  aes(x = `mg_rel_ab_bact > 0`, y = `copies_per_swab_med > 10000`) +
+  aes(x = `mg_rel_ab > 0`, y = `copies_per_swab_med > 10000`) +
   geom_tile(aes(fill = n)) +
   geom_text(aes(label = n)) +
   scale_fill_gradient(low = "white", high = "dodgerblue3") +
@@ -146,11 +144,11 @@ weekly_samples_from_randomized_participants <-
   ) |> 
   dplyr::inner_join(
     mae@colData |> as.data.frame() |> as_tibble() |> 
-      filter(randomized) |> 
+      dplyr::filter(randomized) |> 
       select(uid, pid, visit_code, randomized, arm, visit_type),
     by = join_by(uid)
   ) |> 
-  filter(visit_type == "Clinic")
+  dplyr::filter(visit_type == "Clinic")
   
 
 mae_sub <- mae[, weekly_samples_from_randomized_participants$uid]
@@ -190,7 +188,7 @@ all_samples_from_randomized_participants <-
   ) |> 
   dplyr::inner_join(
     mae@colData |> as.data.frame() |> as_tibble() |> 
-      filter(randomized) |> 
+      dplyr::filter(randomized) |> 
       select(uid, pid, visit_code, randomized, arm),
     by = join_by(uid)
   )
@@ -234,9 +232,11 @@ We rework this graph for all pids and save it as a png.
 ```{r}
 #| eval: false
 
-plot_path <- str_c(
+plot_path <- 
+  str_c(
     get_data_dir(data_source = data_source),  
-    "03 QCed MAEs/profiles_plot/")
+    "03 QCed MAEs/profiles_plot/"
+    )
 
 all_pids <- unique(all_samples_from_randomized_participants$pid)
 
@@ -302,16 +302,16 @@ If the total relative abundance of all LBP strains is larger than 0.1 or the max
 colonization_LBP_mg <- 
   mae[["mg"]] |> 
   as_tibble() |>
-  filter(sample_type == "Clinical sample") |> 
-  filter(!is.na(LBP)) |> 
+  dplyr::filter(sample_type == "Clinical sample") |> 
+  dplyr::filter(!is.na(LBP)) |> 
   group_by(.sample) |> 
   summarize(
     n = n(),
-    total_LBP_rel_ab_at = sum(rel_abs_bact),
-    max_LBP_rel_ab_at = max(rel_abs_bact),
-    n_detected_strains_at = sum(rel_abs_bact > 0),
-    n_detected_LC106_strains_at = sum(rel_abs_bact[LBP == "LC-106 & LC-115"] > 0),
-    n_detected_LC115_only_strains_at = sum(rel_abs_bact[LBP == "LC-115"] > 0)
+    total_LBP_rel_ab_at = sum(rel_ab),
+    max_LBP_rel_ab_at = max(rel_ab),
+    n_detected_strains_at = sum(rel_ab > 0),
+    n_detected_LC106_strains_at = sum(rel_ab[LBP == "LC-106 & LC-115"] > 0),
+    n_detected_LC115_only_strains_at = sum(rel_ab[LBP == "LC-115"] > 0)
   ) |> 
   mutate(
     colonized_LBP_at_mg = (total_LBP_rel_ab_at > 0.1) | (max_LBP_rel_ab_at > 0.05)
@@ -450,11 +450,11 @@ If the total relative abundance of all LBP strains is larger than 0.1 or the max
 colonization_crispatus_mg <- 
   mae[["mg"]] |> 
   as_tibble() |>
-  filter(sample_type == "Clinical sample") |> 
-  filter(species == "crispatus") |> 
+  dplyr::filter(sample_type == "Clinical sample") |> 
+  dplyr::filter(species == "crispatus") |> 
   group_by(.sample) |> 
   summarize(
-    total_crispatus_rel_ab_at = sum(rel_abs_bact),
+    total_crispatus_rel_ab_at = sum(rel_ab),
     #max_crispatus_rel_ab_at = max(rel_abs_bact),
     #n_detected_crispatus_at = sum(rel_abs_bact > 0)
   ) |> 
@@ -552,8 +552,8 @@ colonization_crispatus_mg <-
   mutate(crispatus_dominance_at_mg = crispatus_dominance_at_mg |> replace_na(FALSE)) |>
   group_by(pid) |> 
   mutate(
-    #tmp = ifelse(as.numeric(visit_code) < 1200, FALSE, crispatus_dominance_at_mg),
-    crispatus_dominance_by_mg = cummax(crispatus_dominance_at_mg) |> as.logical()
+    tmp = ifelse(as.numeric(visit_code) < 1200, FALSE, crispatus_dominance_at_mg),
+    crispatus_dominance_by_mg = cummax(tmp) |> as.logical()
   ) |> 
   ungroup() #|> 
   #select(-tmp)
@@ -677,8 +677,8 @@ If the total relative abundance of all LBP strains is larger than 0.1 or the max
 colonization_qPCR <- 
   mae[["qPCR"]] |> 
   as_tibble() |>
-  filter(sample_type == "Clinical sample") |> 
-  filter(!is.na(LBP)) |> 
+  dplyr::filter(sample_type == "Clinical sample") |> 
+  dplyr::filter(!is.na(LBP)) |> 
   group_by(.sample) |> 
   summarize(
     n = n(),
@@ -833,7 +833,7 @@ p1 <- colonization_LBP_mg |>
 
 p2 <- colonization_qPCR |> 
   ggplot() +
-  aes(x = visit_code, y = pid, fill = detected_by_qpcr) +
+  aes(x = visit_code, y = pid, fill = detected_at_qpcr) +
   geom_tile() +
   facet_grid(
     randomized + arm ~ ., 
@@ -915,7 +915,7 @@ se_primary_col_LBP_mg <-
         colonization_LBP_mg |> 
         # filter(!is.na(pid)) |> 
         # mutate(.sample = str_c(pid, "_", visit_code)) |> 
-        filter(!is.na(.sample)) |> 
+        dplyr::filter(!is.na(.sample)) |> 
         select(.sample, colonized_LBP_at_mg, colonized_LBP_by_mg) |> 
         as.data.frame() |> 
         column_to_rownames(".sample") |> t()
@@ -927,7 +927,7 @@ se_primary_col_crisp_mg <-
     assays = list(
       outcome = 
         colonization_crispatus_mg |> 
-        filter(!is.na(.sample)) |> 
+        dplyr::filter(!is.na(.sample)) |> 
         select(.sample, crispatus_dominance_at_mg, crispatus_dominance_by_mg) |> 
         as.data.frame() |> 
         column_to_rownames(".sample") |> t()
@@ -939,7 +939,7 @@ se_primary_col_LBP_qPCR <-
     assays = list(
       outcome = 
         colonization_qPCR |> 
-        filter(!is.na(.sample)) |> 
+        dplyr::filter(!is.na(.sample)) |> 
         select(.sample, detected_at_qpcr, detected_by_qpcr) |> 
         as.data.frame() |> 
         column_to_rownames(".sample") |> t()
@@ -964,8 +964,7 @@ We save the "master" MAE (with all assays); but if needed for publication, we ca
 saveRDS(
   mae, 
   str_c(
-    get_data_dir(data_source = data_source),  
-    "03 QCed MAEs/",
+    get_03_output_dir(),  
     "mae_full_", today() |> str_remove_all("-"), ".rds"
   )
 )

@@ -91,6 +91,7 @@ process_crf_duplicates <- function(crf_clean, participants_crf_name) {
     crf_clean[names(crf_clean) %in% participants_crf_name]
   
   for (crf_name in participants_crf_name) {
+
     data <- crf_clean[[crf_name]]
     
     dup_pid <- 
@@ -109,6 +110,7 @@ process_crf_duplicates <- function(crf_clean, participants_crf_name) {
         data |> 
         mutate(dfseq = NA_integer_)
     }
+
     if(!("visit_code" %in% names(data))) {
       data <- 
         data |> 
@@ -140,8 +142,8 @@ participants_crf <- process_crf_duplicates(crf_clean, participants_crf_name)
 
 ```
 
-
 A list of CRFs that still contain duplicates is displayed below. We will examine them manually.
+
 
 ```{r}
 
@@ -210,7 +212,9 @@ pid_temp <- participants_crf[["crf101"]] |>
 
 participants_crf[["crf101"]] |> 
   dplyr::filter(pid %in% pid_temp)
+  
 # 30 participants with double pid
+
 
 education_levels <- c("Primary school", "Secondary school", "Tertiary education")
 
@@ -239,7 +243,6 @@ rm(pid_temp, education_levels)
 
 ```
  
-
 We combine the demographics data from `crf1` and `crf101` into a single table called `crf1_101`.
 
 ```{r}
@@ -385,6 +388,7 @@ participants_crf[["crf102"]] <- NULL
 
 ```
 
+
 ### crf5
 
 ```{r}
@@ -437,13 +441,13 @@ participants_crf[["crf5"]] <-
 
 ```
 
-
 ### crf6
 
 We keep the values of the most recent visit.
 
 ```{r}
 # crf6
+
 
 pid_temp <- 
   participants_crf[["crf6"]] |> 
@@ -593,6 +597,7 @@ We keep the most recent visit.
 
 ```{r}
 
+
 pid_temp <- 
   participants_crf[["crf11"]] |> 
   dplyr::count(pid) |> 
@@ -642,9 +647,6 @@ participants_crf[["crf12"]] <-
 rm(pid_temp)
 
 ```
-
-
-
 
 ### crf15
 
@@ -696,6 +698,7 @@ We keep the second observation for these participants.
 We rename the variable `prescription_container` to `prescription_container_metronidazole`, `tablets_remain` to `tablets_remain_metronidazole` to avoid conflict with the data from CRF23 (study product exposure).
 
 ```{r}
+
 
 pid_temp <- 
   participants_crf[["crf22"]] |> 
@@ -763,6 +766,7 @@ We keep the most recent visit.
 
 ```{r}
 
+
 pid_temp <- 
   participants_crf[["crf24"]] |> 
   dplyr::count(pid) |> 
@@ -788,6 +792,7 @@ participants_crf[["crf24"]] <-
 We keep the most recent visit.
 
 ```{r}
+
 
 pid_temp <- 
   participants_crf[["crf25"]] |> 
@@ -839,6 +844,7 @@ We keep the first observation for these participants since the second observatio
 
 ```{r}
 
+
 pid_temp <- 
   participants_crf[["crf46"]] |> 
   dplyr::count(pid) |> 
@@ -865,9 +871,6 @@ participants_crf[["crf46"]] <-
 We check that the number of repeated `pid` is null. 
 
 ```{r}
-#| eval: false
-#| echo: false
-
 table_p <- map_df(
   names(participants_crf),
   function(participants_crf_name) {
@@ -897,9 +900,7 @@ participants_crf_name <-
 
 ```
 
-
 ```{r}
-
 participant_crfs_merged <-
   participants_crf[names(participants_crf) %in% participants_crf_name] |> 
   map(
@@ -910,6 +911,7 @@ participant_crfs_merged <-
   ) |>
   purrr::reduce(full_join, by = join_by(pid))
   
+
 # participant_crfs_merged |> colnames() |> str_detect("\\.y") |> sum()
 ```
 
@@ -979,11 +981,8 @@ visits_crfs_merged <-
     by = join_by(pid, visit_code, dfseq)
   )
 
-
-
 visits_crfs_merged |> 
   select(any_of(colnames(visits_crfs_merged)[str_detect(colnames(visits_crfs_merged), "\\.x")]))
-
 ```
 
 

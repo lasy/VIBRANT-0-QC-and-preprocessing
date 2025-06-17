@@ -22,6 +22,7 @@ editor: source
 
 ```{r}
 #| warning: false
+#| cache: false
 
 library(tidyverse)
 library(magrittr)
@@ -31,6 +32,8 @@ library(SummarizedExperiment)
 library(tidySummarizedExperiment)
 
 tmp <- fs::dir_map("R scripts/", source)
+tmp <- fs::dir_map("../VIBRANT-99-utils/R/", source)
+rm(tmp)
 
 theme_set(theme_light())
 
@@ -40,13 +43,13 @@ theme_set(theme_light())
 
 ```{r}
 
-data_source <- "real"
-qpcr_dir <- str_c(get_data_dir(data_source), "00 Raw/03 qPCR/")
-file <- "VIBRANT_qPCR_data_merged_250416.csv"
-cat("We load the file", file, "\n\n")
+qpcr_dir <- str_c(get_data_dir(), "03 qPCR/")
+file <- "VIBRANT_qPCR_data_merged_250611.csv"
+cat("We load the file", file, " (15 LBP strains)\n\n")
 qpcr_LBP <- read_csv(str_c(qpcr_dir, file))
-file <- "VIBRANT_16SqPCR_20250514.csv"
-cat("And the file ", file, "\n\n")
+
+file <- "VIBRANT_16SqPCR_250616.csv"
+cat("\n\nAnd the file ", file, " (16S)\n\n")
 qpcr_16S <- read_csv(str_c(qpcr_dir, file))
 
 rm(qpcr_dir, file)
@@ -65,17 +68,22 @@ qpcr_LBP |> glimpse()
 
 ### Merging 16S and LBP qPCR data
 
-Since the two files have exactly the same columns, we merge them into a single file after some harmonization.
+Since the two files have almost exactly the same columns, we merge them into a single file after some harmonization.
 
-First, we notice that there is only one clinical sample that has data for the LBP qPCR, but not for the 16S qPCR.
+Note that there is one sample that has data for the LBP qPCR, but not for the 16S qPCR.
 
 ```{r}
 
 dplyr::full_join(
-  qpcr_16S |> select(VIBR_Sample_ID, gDNA_Plate_ID) |> mutate(has_16S = TRUE) |> distinct(),
-  qpcr_LBP |> select(VIBR_Sample_ID, gDNA_Plate_ID) |> mutate(has_LBP = TRUE) |> distinct()
-) |>  filter(is.na(has_16S) | is.na(has_LBP)) |> 
-  filter(!is.na(VIBR_Sample_ID), !(VIBR_Sample_ID %in% c("#N/A", "empty"))) 
+  qpcr_16S |> select(VIBR_Sample_ID) |> mutate(has_16S = TRUE) |> distinct(),
+  qpcr_LBP |> select(VIBR_Sample_ID) |> mutate(has_LBP = TRUE) |> distinct()
+) |>  dplyr::filter(is.na(has_16S) | is.na(has_LBP)) |> 
+  dplyr::filter(!is.na(VIBR_Sample_ID), !(VIBR_Sample_ID %in% c("#N/A", "empty"))) |> 
+  mutate(index = row_number()) |> 
+  select(index, everything()) |> 
+  gt(
+    caption = "Clinical sample with data for LBP qPCR but not for 16S qPCR, or vice versa."
+  )
   
 ```
 
@@ -83,20 +91,20 @@ We also note that there is one sample on the same plate that has 6 replicates in
 
 ```{r}
 
-qpcr_16S |> filter(!is.na(VIBR_Sample_ID)) |> dplyr::count(VIBR_Sample_ID, gDNA_Plate_ID ) |> filter(n > 3)
+qpcr_16S |> dplyr::filter(!is.na(VIBR_Sample_ID)) |> dplyr::count(VIBR_Sample_ID, gDNA_Plate_ID ) |> dplyr::filter(n > 3)
+
+qpcr_16S |> dplyr::filter(VIBR_Sample_ID == "2167612") |> select(Data_row, Well, Sample, Cq, Copies_per_swab)
 
 ```
+As discussed with Michael, this is a mislabeling and these 6 are 3 replicates for 2 different samples. Since we have identified this issue already, we will fix it later in the code, using the extraction library plate number and position.
 
-:::callout-warning
-@Michael: do you think this could be a mislabeling?
-:::
 
 ```{r}
 
 # We rename the standards in the 16S qPCR so they are numbered
 std_16s <-
   qpcr_16S |> 
-  filter(str_detect(Content, "Std")) |> 
+  dplyr::filter(str_detect(Content, "Std")) |> 
   select(Content, `Starting Quantity (SQ)`) |> 
   distinct() |> 
   arrange(`Starting Quantity (SQ)` |> desc()) |>
@@ -118,6 +126,7 @@ qpcr_LBP <-
     VIBR_Sample_ID = ifelse(VIBR_Sample_ID == "#N/A", NA_character_, VIBR_Sample_ID)
   )
 
+# we merge the two datasets
 qpcr <- 
   bind_rows(
     qpcr_LBP |> mutate(target_type = "LBP"), 
@@ -157,11 +166,12 @@ dictionary <-
         (original_name == "Group_Fluor") ~ 'Concatenation of the `VMRC_Group` and `Fluor` columns',
         (original_name == "Target") ~ str_c('The target "gene" (here taxa/strain). There are ', qpcr$Target |> unique() |> length(), " unique targets in total (", qpcr$Target |> unique() |> str_c(collapse = ", "),")"),
         (original_name == "target_type") ~ "Whether the target is a LBP strain or the 16S rRNA gene target",
-        (original_name == "gDNA_Plate_Well") ~ str_c('The concatenation of the VIBRANT swab barcode and the gDNA plate well ID; there are ', qpcr$gDNA_Plate_Well |> unique() |> length()," unique gDNA plate wells in total in the format `[gDNA_Plate_ID]_[Well]` (e.g., ", qpcr$gDNA_Plate_Well[10],")"),
+        (original_name == "gDNA_Plate_Well") ~ str_c('The concatenation of the gDNA plate ID and the plate well; there are ', qpcr$gDNA_Plate_Well |> unique() |> length()," unique gDNA plate wells in total in the format `[gDNA_Plate_ID]_[Well]` (e.g., ", qpcr$gDNA_Plate_Well |> unique() |> extract(10),")"),
         (original_name == "VIBR_Sample_ID") ~ str_c("VIBRANT sample ID; there are ", qpcr$VIBR_Sample_ID |> unique() |> length(), " unique VIBRANT sample IDs in total)"),
         (original_name == "Dilution_Factor") ~ str_c('The qPCR plate specific dilution factor. There are ', qpcr$Dilution_Factor |> unique() |> length()," unique dilution factors in total (", qpcr$Dilution_Factor |> unique()  |> sort() |> str_c(collapse = ", "),")"),
         (original_name == "Quant_Adjusted") ~ str_c("Quantification value adjusted by the dilution factor; range from ", min(qpcr$Quant_Adjusted, na.rm = TRUE)," to ", max(qpcr$Quant_Adjusted, na.rm = TRUE)),
         (original_name == "Copies_per_swab") ~ str_c("The number of target copies per swab, computed from the adjusted quantification values. Ranges from ", min(qpcr$Copies_per_swab, na.rm = TRUE)," to ", max(qpcr$Copies_per_swab, na.rm = TRUE)),
+         (original_name == "InRedos") ~ str_c("Whether the sample was part of the samples that were redone (= re-extracted)."),
         TRUE ~ "????"
       )
   )
@@ -215,6 +225,16 @@ dictionary |>
 
 ```
 
+```{r}
+
+qpcr <- 
+  qpcr |> 
+  mutate(
+    in_redos = (in_redos == 1) |> replace_na(FALSE) # Convert to logical
+  )
+```
+
+
 
 ### Sample types and unique sample IDs
 
@@ -240,7 +260,7 @@ qpcr <-
 ```
 
 ```{r}
-# qpcr |> filter(target == "16S") |> arrange(qpcr_sample_type) |> View()
+# qpcr |> dplyr::filter(target == "16S") |> arrange(qpcr_sample_type) |> View()
 ```
 
 
@@ -255,27 +275,28 @@ qpcr |> dplyr::count(qpcr_sample_type, name = "n_wells") |> arrange(-n_wells) |>
 
 tmp <- 
   qpcr |> 
-  filter(qpcr_sample_type == "VIBRANT clinical sample", target == target[1]) |>
+  dplyr::filter(qpcr_sample_type == "VIBRANT clinical sample", target == target[1]) |>
   group_by(vibr_sample_id) |> 
   summarize(
     n_replicates = n(),
-    n_plates = ext_lib_plate_nb |> unique() |> length()
+    n_plates = ext_lib_plate_nb |> unique() |> length(),
+    any_in_redos = any(in_redos)
   )
 
-# tmp |> dplyr::count(n_plates) # All samples's replicates are on a single plate
+# tmp |> dplyr::count(n_plates, any_in_redos) # All samples's replicates are on a single plate
 
-# tmp |> dplyr::count(n_replicates) # All samples have 3 replicates
+# tmp |> dplyr::count(n_replicates, n_plates, any_in_redos) # All samples have 3 replicates
 
 ```
 
-We note that all samples's replicates are on a single extraction plate (`ext_lib_plate_nb` or `ext_lib_plate_id`); and all samples have the same number of replicates (3).
+We note that almost all samples's replicates are on a single extraction plate (`ext_lib_plate_nb` or `ext_lib_plate_id`); and almost all samples have the same number of replicates (3). A few samples (those `in_redos`) are on two plates and have 6 replicates.
 
 
 ```{r}
 
 tmp <- 
   qpcr |> 
-  filter(qpcr_sample_type == "VIBRANT clinical sample", target == "16S") |>
+  dplyr::filter(qpcr_sample_type == "VIBRANT clinical sample", target == "16S") |>
   group_by(vibr_sample_id) |> 
   summarize(
     n_replicates = n(),
@@ -289,21 +310,18 @@ tmp <-
 ```
 
 
-:::callout-caution
-As noted above, in the 16S qPCR, there is one sample that has 6 replicates:
-:::
-
 ```{r}
+#| eval: false
 
 tmp |> 
-  filter(n_replicates == 6) |> 
-  dplyr::left_join(qpcr |> filter(target == "16S"), by = join_by(vibr_sample_id)) |> 
+  dplyr::filter(n_replicates == 6) |> 
+  dplyr::left_join(qpcr |> dplyr::filter(target == "16S"), by = join_by(vibr_sample_id)) |> 
   select(vibr_sample_id, ext_lib_plate_nb, ext_lib_position, pcr_plate_id, data_row, well, cq) |> 
   gt()
 
 ```
 
-
+We'll fix that below.
 
 
 ```{r}
@@ -345,7 +363,7 @@ qpcr <-
       )
   ) |> 
   group_by(qpcr_sample_id, target) |>
-  arrange(well_col, well_row) |>
+  arrange(ext_lib_plate_nb, well_col, well_row) |>
   mutate(replicate_nb = row_number()) |> 
   ungroup() |> 
   mutate(qpcr_uid = str_c(qpcr_sample_id, "_r", replicate_nb))
@@ -354,33 +372,65 @@ qpcr <-
 
 ```{r}
 
-# qpcr |> filter(replicate_nb > 3) |> View()
+# qpcr |> dplyr::filter(replicate_nb > 3) |> View()
 
 ```
 
 
 
-For the LBP strains, the plate layout is as follows:
+For the LBP strains, the plate layout is as follows for the first 11 extraction plates:
 
 
 ```{r}
 #| fig-width: 17
 #| fig-height: 7
 
+qpcr_sample_type_colors <- c(
+  "VIBRANT clinical sample" = "dodgerblue2",
+  "Control sample" = "turquoise",
+  "Standard" = "gold",
+  "Water" = "lightblue1",
+  "Empty" = "gray",
+  "Water or empty" = "gray80"
+)
+
 qpcr |> 
-  filter(target != "16S") |> 
+  dplyr::filter(target != "16S", ext_lib_plate_nb <= 11) |> 
   select(ext_lib_plate_nb, well_col, well_row, qpcr_sample_type, sample) |>
   distinct() |>
   ggplot() +
   aes(x =  well_row |> factor(), y = well_col |> factor() |> fct_rev(), fill = qpcr_sample_type) +
+  facet_wrap(~ ext_lib_plate_nb) +
   geom_tile() +
   geom_path(aes(group = sample), col = "black", alpha = 0.5) +
   geom_point() +
-  facet_wrap(~ ext_lib_plate_nb) +
+  scale_fill_manual(values = qpcr_sample_type_colors) +
   xlab("Well column") + ylab("Well row") +
   labs(caption = "Black lines connect replicates") 
-  
+
 ```
+
+For the 12th plate, the layout is a little bit different and the first PCR plate (for the first group of 3 target) is different from the 4 other:
+
+```{r}
+#| fig-width: 17
+#| fig-height: 7
+
+qpcr |> 
+  dplyr::filter(target != "16S", ext_lib_plate_nb == 12) |> 
+  select(ext_lib_plate_nb, pcr_plate_id, well_col, well_row, qpcr_sample_type, sample, strain_group_qpcr) |>
+  distinct() |>
+  ggplot() +
+  aes(x =  well_row |> factor(), y = well_col |> factor() |> fct_rev(), fill = qpcr_sample_type) +
+  facet_wrap(~ pcr_plate_id + strain_group_qpcr) +
+  geom_tile() +
+  geom_path(aes(group = sample), col = "black", alpha = 0.5) +
+  geom_point() +
+  scale_fill_manual(values = qpcr_sample_type_colors) +
+  xlab("Well column") + ylab("Well row") +
+  labs(caption = "Black lines connect replicates") 
+```
+
 For the 16S plates, the layout is a little different:
 
 ```{r}
@@ -388,15 +438,17 @@ For the 16S plates, the layout is a little different:
 #| fig-height: 7
 
 qpcr |> 
-  filter(target == "16S") |> 
+  dplyr::filter(target == "16S") |> 
   select(ext_lib_plate_nb, pcr_plate_id, well_col, well_row, qpcr_sample_type, qpcr_sample_id) |>
   distinct() |>
   ggplot() +
   aes(x =  well_row |> factor(), y = well_col |> factor() |> fct_rev(), fill = qpcr_sample_type, col = qpcr_sample_type) +
+  facet_wrap(~ ext_lib_plate_nb + pcr_plate_id) +
   geom_tile(alpha = 0.25) +
   geom_path(aes(group = qpcr_sample_id), alpha = 0.5, linewidth = 2) +
   geom_point() +
-  facet_wrap(~ ext_lib_plate_nb + pcr_plate_id) +
+  scale_fill_manual(values = qpcr_sample_type_colors) +
+  scale_color_manual(values = qpcr_sample_type_colors) +
   xlab("Well column") + ylab("Well row") +
   labs(caption = "Lines connect replicates") 
   
@@ -404,54 +456,184 @@ qpcr |>
 
 
 
-
-
 ### Manifest data
 
 We merge the qPCR data with the metagenomics manifest data to add the participant ID (`pid`) and (`visit_code`).
 
+But before we do that, we fix the `qpcr_sample_id` for that sample that had 6 replicates instead of 3 in the 16S qPCR because, after discussion with Michael, we know that one of these barcode was wrong.
+
 ```{r}
 
-SE_mg <- 
-  readRDS(
-    list.files(
-      path = get_output_dir(data_source = data_source), 
-      pattern = "02_se_mg_.*\\.rds$", full.names = TRUE
-    ) |> 
-      sort(decreasing = TRUE) |>
-      extract(1) 
-  )
+six_replicates <- 
+  qpcr |> 
+  dplyr::filter(target == "16S") |> 
+  group_by(qpcr_sample_id) |> 
+  mutate(n_replicates = n(), none_on_plate_12 = !any(ext_lib_plate_nb == 12)) |> 
+  ungroup() |> 
+  dplyr::filter(n_replicates > 3, none_on_plate_12) |> 
+  select(target, vibr_sample_id, qpcr_sample_id, qpcr_uid, ext_lib_position, ext_lib_plate_nb, ext_lib_plate_id, n_replicates)
+
+six_replicates |> gt()
+```
+
+We see that these 6 replicates have 2 different positions on the extraction library plate so we will be able to fix their sample ID from using extraction plate data from the technical metadata manifest using the concatenation of `ext_lib_plate_id` and `ext_lib_position`.
+
+
+```{r}
+
+technical_metadata_file <- 
+  list.files(
+    path = get_01_output_dir(), 
+    pattern = "02_technical_metadata_agg_.*\\.rds$", full.names = TRUE
+  ) |> 
+  sort(decreasing = TRUE) |>
+  extract(1)
+
+technical_metadata <- readRDS(technical_metadata_file)
+
+rm(technical_metadata_file)
+
+# SE_mg <- 
+#   readRDS(
+#     list.files(
+#       path = get_output_dir(data_source = data_source), 
+#       pattern = "02_se_mg_.*\\.rds$", full.names = TRUE
+#     ) |> 
+#       sort(decreasing = TRUE) |>
+#       extract(1) 
+#   )
 
 ```
+
+```{r}
+
+six_replicates |> 
+  mutate(ext_lib_well = ext_lib_position |> str_remove("[0-9]*_")) |> 
+  dplyr::left_join(
+    technical_metadata |> 
+      select(swab_barcode, ext_lib_plate_nb, ext_lib_plate_id, ext_lib_position) |>
+      dplyr::rename(
+        ext_lib_plate_id_mg_manifest = ext_lib_plate_id,
+        ext_lib_well = ext_lib_position
+      )
+  ) |> gt()
+```
+
+One thing that is weird is that the `ext_lib_plate_id` in the technical metadata manifest is not the same as the one in the qPCR data:
+
+```{r}
+
+qpcr |> 
+  dplyr::count(ext_lib_plate_nb, ext_lib_plate_id) |> 
+  gt(caption = "Extraction library plate nb and IDs as found in the qPCR data.")
+
+technical_metadata |> 
+  dplyr::count(ext_lib_plate_nb, ext_lib_plate_id) |> 
+  gt(caption = "Extraction library plate nb and IDs as found in the metagenomics technical metadata.")
+
+```
+
+:::callout-warning
+@Michael: What are your thoughts on this? Am I assuming they should be the same when there is no reason for them to be the same?
+:::
+
+Regardless, since the `ext_lib_plate_nb` seems to match, we'll use this to fix that 6-replicates sample. From the table above, it looks like the `qpcr_sample_id` for the 16S qPCR located in well E4 should be `2171048` instead of `2167612`.
+
+We fix their `vibr_sample_id`, `qpcr_sample_id`, `qpcr_uid`, and `replicate_nb` columns.
 
 
 ```{r}
 
 qpcr <- 
   qpcr |> 
+  mutate(
+    needs_change = 
+      (qpcr_sample_id == "2167612" & 
+         target == "16S" & 
+         ext_lib_plate_nb == 1 & 
+         ext_lib_position == "2240890_E4"),
+    needs_replicates_change = 
+      (qpcr_sample_id == "2167612" & 
+         target == "16S" & 
+         ext_lib_plate_nb == 1 & 
+         ext_lib_position == "2240890_G5"),
+    qpcr_sample_id = case_when(
+      needs_change ~ "2171048",
+      TRUE ~ qpcr_sample_id
+    ),
+    vibr_sample_id = case_when(
+      needs_change ~ "2171048",
+      TRUE ~ vibr_sample_id
+    ),
+    qpcr_uid = case_when(
+      needs_change ~ qpcr_uid |> str_replace("2167612", "2171048"),
+      needs_replicates_change ~ qpcr_uid |> str_replace("r4", "r1") |> str_replace("r5", "r2") |> str_replace("r6", "r3"),
+      TRUE ~ qpcr_uid
+    ),
+    replicate_nb = 
+      case_when(
+        needs_replicates_change ~ replicate_nb - 3L,
+        TRUE ~ replicate_nb
+      )
+  ) |> 
+  select(-needs_change, needs_replicates_change)
+
+```
+
+
+
+
+Now that this is fixed, we can merge the technical metadata with the qPCR data to be able to build their `uid` (VIBRANT cross-assay unique identifier) and identify their `sample_type`, `control_type`, etc.
+
+```{r}
+# 
+# qpcr <- 
+#   qpcr |> 
+#   dplyr::left_join(
+#     SE_mg |>
+#       colData() |> as.data.frame() |> as_tibble() |> 
+#       select(
+#         swab_barcode,
+#         uid, mg_uid, 
+#         mg_pid, mg_visit_code,
+#         sample_type, control_type
+#       ) |> 
+#       distinct() ,
+#     by = join_by("qpcr_sample_id" == "swab_barcode")
+#   )
+
+qpcr <- 
+  qpcr |> 
   dplyr::left_join(
-    SE_mg |>
-      colData() |> as.data.frame() |> as_tibble() |> 
+    technical_metadata |> 
       select(
         swab_barcode,
         uid, mg_uid, 
-        mg_pid, pid, visit_code, location,
-        sample_type, control_type, sample_category
-      ) |> 
-      distinct() ,
+        mg_pid, mg_visit_code, 
+        sample_type, control_type
+      ),
     by = join_by("qpcr_sample_id" == "swab_barcode")
   )
 
 ```
 
+```{r}
+#| eval: false
+
+qpcr |>
+  dplyr::filter(is.na(mg_uid)) |> 
+  dplyr::count(content, vibr_sample_id) |> 
+  View()
+
+```
 
 
 ```{r}
 
 samples_without_entries_in_mg_manifest <- 
   qpcr |> 
-  filter(qpcr_sample_type %in% c("VIBRANT clinical sample", "Control sample")) |>
-  filter(is.na(uid)) |> 
+  dplyr::filter(qpcr_sample_type %in% c("VIBRANT clinical sample", "Control sample")) |>
+  dplyr::filter(is.na(uid)) |> 
   select(qpcr_sample_id, qpcr_sample_type) |> 
   distinct()  |> 
   arrange(qpcr_sample_type, qpcr_sample_id) 
@@ -463,13 +645,39 @@ There are `r nrow(samples_without_entries_in_mg_manifest)` clinical or vibrant p
 ```{r}
 
 samples_without_entries_in_mg_manifest |> 
-  dplyr::count(qpcr_sample_type) |>
+  # dplyr::count(qpcr_sample_type) |>
   gt()
 
 ```
 
+In an email from June 16th 2025, Michael indicated that this is a negative biological sample (`Unused swab + C2`).
 
-> TODO: export for Michael?
+We fix it manually for data completion:
+
+```{r}
+
+qpcr <- 
+  qpcr |> 
+  mutate(
+    sample_type = 
+      case_when(
+        qpcr_sample_id == "2320838" ~ "Negative control",
+        TRUE ~ sample_type |> as.character()
+      ) |> factor(levels = levels(qpcr$sample_type)),
+    control_type =
+      case_when(
+        qpcr_sample_id == "2320838" ~ "Unused swab + C2",
+        TRUE ~ control_type |> as.character()
+      ) |> factor(levels = levels(qpcr$control_type)),
+    qpcr_sample_type = 
+      case_when(
+        qpcr_sample_id == "2320838" ~ "Control sample",
+        TRUE ~ qpcr_sample_type
+      )
+  )
+
+```
+
 
 For these samples, the current `uid` is missing. We change it to the `qpcr_sample_id` when `NA`.
 
@@ -492,35 +700,129 @@ qpcr <-
 
 
 
+
 ```{r}
 
+# mg_samples <- 
+#   SE_mg |>
+#   colData() |> as.data.frame() |> as_tibble() |> 
+#   select(
+#     swab_barcode,
+#     uid, mg_uid, 
+#     mg_pid,mg_visit_code, 
+#     sample_type, control_type
+#   ) |> 
+#   distinct() |> 
+#   dplyr::left_join(
+#     qpcr |> 
+#       select(qpcr_sample_id, qpcr_sample_type) |> 
+#       distinct() |> 
+#       dplyr::filter(qpcr_sample_type %in% c("VIBRANT clinical sample", "Control sample")),
+#     by = join_by("swab_barcode" == "qpcr_sample_id")
+#   )
+
 mg_samples <- 
-  SE_mg |>
-  colData() |> as.data.frame() |> as_tibble() |> 
+  technical_metadata |> 
   select(
     swab_barcode,
     uid, mg_uid, 
-    mg_pid, pid, visit_code, 
-    sample_type, control_type, sample_category
+    mg_pid,mg_visit_code, 
+    sample_type, control_type,
+    ext_lib_plate_nb, no_mg_data
   ) |> 
   distinct() |> 
   dplyr::left_join(
     qpcr |> 
       select(qpcr_sample_id, qpcr_sample_type) |> 
       distinct() |> 
-      filter(qpcr_sample_type %in% c("VIBRANT clinical sample", "Control sample")),
+      dplyr::filter(qpcr_sample_type %in% c("VIBRANT clinical sample", "Control sample")),
     by = join_by("swab_barcode" == "qpcr_sample_id")
-  )
+  ) |> 
+  arrange(uid)
 
-# mg_samples |> filter(is.na(qpcr_sample_type)) |> nrow()
+# mg_samples |> dplyr::filter(is.na(qpcr_sample_type)) |> nrow()
 
 ```
 
-There are `r mg_samples |> filter(is.na(qpcr_sample_type)) |> nrow()` samples for which we have metagenomics data but no qPCR data.
+There are `r mg_samples |> dplyr::filter(is.na(qpcr_sample_type)) |> nrow()` samples for which we have metagenomics data but no qPCR data:
+
+```{r}
+mg_samples |> dplyr::filter(is.na(qpcr_sample_type)) |> gt()
+```
+
+
+```{r}
+
+mg_samples <- 
+  technical_metadata |> 
+  select(
+    swab_barcode,
+    uid, mg_uid, 
+    mg_pid,mg_visit_code, 
+    sample_type, control_type,
+    ext_lib_plate_nb, no_mg_data
+  ) |> 
+  distinct() |> 
+  dplyr::left_join(
+    qpcr |>
+      select(qpcr_sample_id, qpcr_sample_type, target) |> 
+      distinct() |> 
+      dplyr::filter(
+        target == "16S",
+        qpcr_sample_type %in% c("VIBRANT clinical sample", "Control sample")
+        ),
+    by = join_by("swab_barcode" == "qpcr_sample_id")
+  ) |> 
+  arrange(uid)
+
+
+```
+
+
+And there are `r mg_samples |> dplyr::filter(is.na(qpcr_sample_type)) |> nrow()` samples for which we have metagenomics data but no 16S qPCR data:
+
+```{r}
+mg_samples |> dplyr::filter(is.na(qpcr_sample_type)) |> gt()
+```
 
 ```{r}
 rm(mg_samples, samples_without_entries_in_mg_manifest, tmp)
 ```
+
+
+
+
+```{r}
+#| eval: false
+
+qpcr |> 
+  dplyr::count(qpcr_sample_type, sample_type, control_type)
+
+```
+
+```{r}
+
+qpcr <- 
+  qpcr |> 
+  mutate(
+    sample_type = 
+      case_when(
+        is.na(sample_type) & (qpcr_sample_type == "VIBRANT clinical sample") ~ "Clinical sample",
+        is.na(sample_type) & (qpcr_sample_type %in% c("Empty", "Water", "Water or empty")) ~ "Technical negative control",
+        is.na(sample_type) & (qpcr_sample_type == "Standard") ~ "Standard",
+        TRUE ~ sample_type
+      ),
+    control_type =
+      case_when(
+        is.na(control_type) & (qpcr_sample_type != "VIBRANT clinical sample") ~ qpcr_sample_type,
+        is.na(control_type) & (qpcr_sample_type == "VIBRANT clinical sample") ~ "",
+        TRUE ~ control_type
+      )
+  )
+
+```
+
+
 
 
 
@@ -529,7 +831,7 @@ rm(mg_samples, samples_without_entries_in_mg_manifest, tmp)
 The plate x Fluorescence x Target layout is as follows:
 
 ```{r}
-#| fig-width: 10
+#| fig-width: 13
 #| fig-height: 4.5
 
 qpcr |> 
@@ -569,14 +871,24 @@ We also add the LBP strain information to the qPCR data.
 
 ```{r}
 
+SE_mg <-
+  readRDS(
+    list.files(
+      path = get_01_output_dir(),
+      pattern = "02_se_mg_.*\\.rds$", full.names = TRUE
+    ) |>
+      sort(decreasing = TRUE) |>
+      extract(1)
+  )
+
 qpcr <- 
   qpcr |> 
   dplyr::left_join(
     SE_mg |>
       rowData() |> as.data.frame() |> as_tibble() |> 
-      filter(!is.na(LBP)) |> 
-      select(taxa, taxon_label, LBP, strain_id, strain_origin, biose_id) |> 
-      dplyr::rename(target = taxa),
+      dplyr::filter(!is.na(LBP)) |> 
+      select(taxon_id, taxon_label, LBP, strain_id, strain_origin, biose_id) |> 
+      dplyr::rename(target = taxon_id),
     by = join_by(target)
   )
 
@@ -635,7 +947,7 @@ I assume that, either the standards are **not** diluted, and that the `quant_adj
 
 ```{r}
 qpcr |>
-  filter(qpcr_sample_type == "Standard", target != "16S") |> 
+  dplyr::filter(qpcr_sample_type == "Standard", target != "16S") |> 
   select(
     sample, starting_quantity, dilution_factor, quant_adjusted, copies_per_swab
   ) |> 
@@ -651,7 +963,7 @@ qpcr |>
 #| fig-width: 10
 
 qpcr |>
-  filter(qpcr_sample_type == "Standard") |> 
+  dplyr::filter(qpcr_sample_type == "Standard") |> 
   arrange(-dilution_factor) |>
   ggplot() +
   aes(
@@ -732,7 +1044,7 @@ qpcr |>
   facet_wrap(. ~ strain_group_qpcr + target, ncol = 9) +
   scale_color_manual(
     "Dilution factor", 
-    values = colorRampPalette(c("dodgerblue1", "gray90"))(4)
+    values = colorRampPalette(c("dodgerblue1", "gray90"))(6)
     )
 
 ```
@@ -754,7 +1066,7 @@ qpcr |>
   facet_wrap(. ~ strain_group_qpcr + target, ncol = 9) +
   scale_color_manual(
     "Dilution factor", 
-    values = colorRampPalette(c("dodgerblue1", "gray90"))(4)
+    values = colorRampPalette(c("dodgerblue1", "gray90"))(6)
     )
 
 ```
@@ -773,7 +1085,7 @@ Here, that number is 250 for all LBP targets.
 # strain_group_qpcr + target
 
 qpcr |>
-  filter(target != "16S") |> 
+  dplyr::filter(target != "16S") |> 
   ggplot() +
   aes(
     x = (quant_adjusted * 250) |> log10(), 
@@ -784,12 +1096,12 @@ qpcr |>
   geom_point(size = 0.5, alpha = 0.4) +
   facet_wrap(. ~ ext_lib_plate_nb , ncol = 6) 
 ```
-For the 16S target, that number is 500.
+For the 16S target, that number is 500, except for plate 12, where it is 250.
 
 ```{r}
 #| eval: false
 qpcr |>
-  filter(target == "16S") |> 
+  dplyr::filter(target == "16S") |> 
   mutate(
     r = copies_per_swab / (quant_adjusted )
   ) |> 
@@ -799,6 +1111,25 @@ qpcr |>
 
 ```
 
+This was actually a mistake and it should be 250 for all plates for the 16S target.
+
+We fix this here:
+
+```{r}
+qpcr <- 
+  qpcr |> 
+  mutate(
+    copies_per_swab = 
+      case_when(
+        (qpcr_sample_type != "Standard") & 
+          (target == "16S") & 
+          (ext_lib_plate_nb < 12) ~ 
+          copies_per_swab / 2,
+        TRUE ~ 
+          copies_per_swab
+      )
+  )
+```
 
 
 
@@ -842,7 +1173,7 @@ qpcr |>
   facet_grid(strain_group_qpcr ~ ext_lib_plate_nb, scales = "free", space = "free") +
   scale_fill_manual(
     "Dilution factor", 
-    values = colorRampPalette(c("dodgerblue1", "gray90"))(4)
+    values = colorRampPalette(c("dodgerblue1", "gray90"))(6)
     ) +
   xlab("Well column") + ylab("Well row") 
 
@@ -996,7 +1327,7 @@ From the plots above, it looks like the empty and water samples have non-zero va
 
 plot_qpcr_empties <- function(qpcr, color_by = "qpcr_sample_type") {
   qpcr |> 
-    filter(qpcr_sample_type %in% c("Empty", "Water")) |> 
+    dplyr::filter(qpcr_sample_type %in% c("Empty", "Water")) |> 
     group_by(sample, pcr_plate_id, ext_lib_plate_nb, target) |>
     mutate(replicate_nb = row_number()) |> 
     ungroup() |> 
@@ -1047,7 +1378,7 @@ We see the same issues as above for the first 3 plates of VMRC group 1.
 #| fig-height: 8
 
 qpcr |> 
-  filter(qpcr_sample_type %in% c("Control sample")) |> 
+  dplyr::filter(qpcr_sample_type %in% c("Control sample")) |> 
   group_by(sample, pcr_plate_id, ext_lib_plate_nb, target) |>
   mutate(replicate_nb = row_number()) |> 
   ungroup() |> 
@@ -1069,11 +1400,8 @@ qpcr |>
   ) 
 
 ```
-:::callout-warning
-I am surprise to see that almost all Mock 1 samples are positive (copies per swabs >>) because, these samples were supposed to be pooled samples from the CAP084 study. I don't think that participants of that study received the LBP. It could also be that I made wrong assumptions when matching the `vibr_sample_id` with the metagenomics manifest data.
-:::
 
-The "negative controls" look better (= more consistent with expectations), except, again, for the first 3 plates of VMRC group 1.
+These look consistent with expectations, except, again, for the first 3 plates of VMRC group 1.
 
 
 ### Standards
@@ -1082,7 +1410,7 @@ The "negative controls" look better (= more consistent with expectations), excep
 #| fig-width: 12
 
 qpcr |> 
-  filter(qpcr_sample_type %in% "Standard") |>
+  dplyr::filter(qpcr_sample_type %in% "Standard") |>
   ggplot() +
   aes(x = starting_quantity, y = cq, col = replicate_nb |> factor()) +
   geom_point(alpha = 0.5, size = 0.5) +
@@ -1119,7 +1447,7 @@ purrr::walk(
 
     g <- 
       qpcr |> 
-      filter(qpcr_sample_type %in% "Standard", target == x) |>
+      dplyr::filter(qpcr_sample_type %in% "Standard", target == x) |>
       mutate(std_nb = content |> str_remove("Std-") |> parse_number()) |> 
       ggplot() +
       aes(x = starting_quantity, y = cq, col = dilution_factor |> factor()) +
@@ -1153,7 +1481,7 @@ purrr::walk(
 
 
 qpcr |> 
-  filter(qpcr_sample_type %in% "Standard") |>
+  dplyr::filter(qpcr_sample_type %in% "Standard") |>
   mutate(std_nb = content |> str_remove("Std-") |> parse_number()) |> 
   ggplot() +
   aes(x = starting_quantity, y = cq, col = dilution_factor |> factor()) +
@@ -1182,7 +1510,7 @@ It looks like standard 4 was not prepared or placed properly for VMRC group 4.
 
 
 qpcr |> 
-  filter(qpcr_sample_type %in% "Standard") |>
+  dplyr::filter(qpcr_sample_type %in% "Standard") |>
   mutate(std_nb = content |> str_remove("Std-") |> parse_number()) |> 
   ggplot() +
   aes(x = starting_quantity, y = cq, col = ext_lib_plate_nb |> factor()) +
@@ -1200,13 +1528,12 @@ This shows again the issues with the first 3 plates of VMRC group 1.
 
 ### Clinical samples
 
-
 ```{r}
 #| fig-width: 15
 #| fig-height: 10
 
 qpcr |> 
-  filter(qpcr_sample_type %in% c("VIBRANT clinical sample")) |> 
+  dplyr::filter(qpcr_sample_type %in% c("VIBRANT clinical sample")) |> 
   group_by(vibr_sample_id, sample, pcr_plate_id, ext_lib_plate_nb, target) |>
   mutate(
     replicate_nb = row_number(),
@@ -1238,6 +1565,44 @@ We could simply discard these values (exclude these targets x plates) or try to 
 :::
 
 
+#### Replicates
+
+
+```{r}
+#| fig-width: 15
+#| fig-height: 10
+
+qpcr |> 
+  dplyr::filter(qpcr_sample_type %in% c("VIBRANT clinical sample")) |> 
+  group_by(qpcr_sample_id, vibr_sample_id, target) |>
+  mutate(
+    n_replicates = n(),
+    replicate_nb = row_number(),
+    median_cps = median(copies_per_swab, na.rm = TRUE),
+    mean_cps = mean(copies_per_swab, na.rm = TRUE),
+    min_ext_lib_plate_nb = min(ext_lib_plate_nb, na.rm = TRUE),
+    ) |> 
+  ungroup() |> 
+  dplyr::filter(n_replicates > 3) |>
+  mutate(vibr_sample_id = vibr_sample_id |> fct_reorder(mean_cps)) |>
+  ggplot() +
+  aes(x = ext_lib_plate_nb |> factor(), y = copies_per_swab, label = replicate_nb, col = (ext_lib_plate_nb == 12)) +
+  facet_grid(strain_group_qpcr + target ~ min_ext_lib_plate_nb + vibr_sample_id, scales = "free_x", space = "free_x") +
+  geom_text(size = 3) +
+  scale_y_log10() +
+  scale_color_discrete("replicate") +
+  scale_x_discrete("Extraction plate") +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1),
+    strip.text.y = element_text(angle = 0),
+    strip.text.x = element_text(angle = 90, hjust = 1)
+  )
+
+```
+
+Agreement between pairs of triplicates is good except for the samples that initially were on the first 3 plates for VMRC group 1.
+
+
 ## New detection thresholds ?
 
 The idea is to use the negative controls `cq` values to define plate- and target-specific "detection" thresholds, then use these thresholds to set to 0 the `copies_per_swab` values for which the `cq` values are above the threshold.
@@ -1249,7 +1614,7 @@ The figures below show the `cq` values for the VMRC group 1 and 2.
 #| fig-width: 15
 
 qpcr |>
-  filter(strain_group_qpcr %in% c("VMRC_1", "VMRC_2")) |>
+  dplyr::filter(strain_group_qpcr %in% c("VMRC_1", "VMRC_2")) |>
   ggplot() +
   aes(
     x = well_row |> factor(), 
@@ -1277,7 +1642,7 @@ qpcr <- qpcr |> mutate(cq_imp = cq |> replace_na(45))
 #| fig-width: 15
 
 qpcr |>
-  filter(strain_group_qpcr %in% c("VMRC_1", "VMRC_2")) |>
+  dplyr::filter(strain_group_qpcr %in% c("VMRC_1", "VMRC_2")) |>
   ggplot() +
   aes(
     x = well_row |> factor(), 
@@ -1321,7 +1686,7 @@ We define the thresholds as the average over the two smallest `cq` value for the
 
 thresholds <- 
   qpcr |> 
-  filter(target != "16S") |> 
+  dplyr::filter(target != "16S") |> 
   group_by(target, strain_group_qpcr, ext_lib_plate_nb) |> 
   summarize(
     min_cq_empties = min(cq_imp[simplified_type == "Negative control"], na.rm = TRUE),
@@ -1343,7 +1708,7 @@ thresholds <-
 #| fig-height: 8
 
 qpcr |> 
-  filter(
+  dplyr::filter(
     strain_group_qpcr %in% c("VMRC_1", "VMRC_2"), 
     ext_lib_plate_nb <= 6,
     simplified_type %in% c("VIBRANT clinical sample", "Standard", "Negative control") 
@@ -1354,7 +1719,7 @@ qpcr |>
   geom_violin(col = "gray") +
   geom_jitter(height = 0, width = 0.25, alpha = 0.5, size = 0.75) +
   geom_hline(
-    data = thresholds |> filter(strain_group_qpcr %in% c("VMRC_1", "VMRC_2"), ext_lib_plate_nb <= 6), 
+    data = thresholds |> dplyr::filter(strain_group_qpcr %in% c("VMRC_1", "VMRC_2"), ext_lib_plate_nb <= 6), 
     aes(yintercept = threshold_cq), col = "steelblue1"
     ) +
   facet_grid(target ~ ext_lib_plate_nb) +
@@ -1384,7 +1749,7 @@ For all plates and targets
 #| fig-height: 6
 
 qpcr |>
-  filter(qpcr_sample_type == "VIBRANT clinical sample") |> 
+  dplyr::filter(qpcr_sample_type == "VIBRANT clinical sample") |> 
   ggplot() +
   aes(x = cq_imp, y = target) +
   geom_violin(fill = "gray90", col = "transparent") +
@@ -1435,7 +1800,7 @@ qpcr <-
 #| fig-height: 10
 
 qpcr |> 
-  filter(qpcr_sample_type %in% c("VIBRANT clinical sample")) |> 
+  dplyr::filter(qpcr_sample_type %in% c("VIBRANT clinical sample")) |> 
   group_by(qpcr_sample_id, sample, pcr_plate_id, ext_lib_plate_nb, target) |>
   mutate(
     replicate_nb = row_number(),
@@ -1484,7 +1849,7 @@ qpcr <-
 #| fig-height: 5
 
 qpcr |> 
-  filter(qpcr_sample_type %in% c("VIBRANT clinical sample")) |>
+  dplyr::filter(qpcr_sample_type %in% c("VIBRANT clinical sample")) |>
   group_by(qpcr_sample_id) |> mutate(n_target_detected = sum(copies_per_swab_raw_median > 0)) |> ungroup() |>
   mutate(qpcr_sample_id = qpcr_sample_id |> fct_reorder(n_target_detected)) |>
   ggplot() +
@@ -1507,7 +1872,7 @@ qpcr |>
 #| fig-height: 5
 
 qpcr |> 
-  filter(qpcr_sample_type %in% c("VIBRANT clinical sample")) |>
+  dplyr::filter(qpcr_sample_type %in% c("VIBRANT clinical sample")) |>
   group_by(qpcr_sample_id) |> mutate(n_target_detected = sum(copies_per_swab_adj_median > 0)) |> ungroup() |>
   mutate(qpcr_sample_id = qpcr_sample_id |> fct_reorder(n_target_detected)) |>
   ggplot() +
@@ -1535,15 +1900,19 @@ When looking at the longitudinal patterns for randomized participants, we do not
 #| fig-height: 12
 
 qpcr |> 
-  filter(
+  dplyr::filter(
     sample_type %in% c("Clinical sample"), 
-    sample_category %in% c("Expected sample"),
-    visit_code %in% c(seq(1000, 1900, by = 100), 2120)
-    ) |>
-  group_by(pid) |> mutate(n_target_detected = sum(copies_per_swab_adj_median[!is.na(LBP)] > 0)) |> ungroup() |>
-  mutate(pid = pid |> fct_reorder(n_target_detected)) |>
+    # sample_category %in% c("Expected sample"),
+    mg_visit_code %in% c(seq(1000, 1900, by = 100), 2120)
+  ) |>
+  group_by(mg_pid) |> mutate(n_target_detected = sum(copies_per_swab_adj_median[!is.na(LBP)] > 0)) |> ungroup() |>
+  mutate(mg_pid = mg_pid |> fct_reorder(n_target_detected)) |>
   ggplot() +
-  aes(x = pid, y = visit_code, fill = ext_lib_plate_nb |> factor(), alpha = copies_per_swab_adj_median |> log10()) +
+  aes(
+    x = mg_pid, y = mg_visit_code, 
+    fill = ext_lib_plate_nb |> factor(), 
+    alpha = copies_per_swab_adj_median |> log10()
+  ) +
   geom_tile() +
   facet_grid(strain_group_qpcr + target ~ ., scales = "free") +
   scale_fill_discrete("Extraction plate number") +
@@ -1559,25 +1928,56 @@ qpcr |>
 We should thus expect some false positive in the LBP qPCR data :)
 
 
+```{r}
+#| fig-width: 12
+#| fig-height: 12
+
+qpcr |> 
+  dplyr::filter(
+    target != "16S",
+    sample_type %in% c("Clinical sample"), 
+    mg_visit_code %in% c(0, seq(1000, 1900, by = 100), 2120)
+  ) |>
+  # group_by(mg_pid) |> mutate(n_target_detected = sum(copies_per_swab_adj_median[!is.na(LBP)] > 0)) |> ungroup() |>
+  # mutate(mg_pid = mg_pid |> fct_reorder(n_target_detected)) |>
+  mutate(mg_pid = mg_pid |> factor()) |>
+  mutate(target = target |> fct_reorder(as.numeric(factor(LBP)) + as.numeric(factor(strain_origin))/10)) |> 
+  ggplot() +
+  aes(
+    x = target, y = mg_pid |> fct_rev(), 
+    fill = LBP,
+    alpha = copies_per_swab_adj_median |> log10()
+  ) +
+  geom_tile() +
+  facet_grid(. ~ mg_visit_code) +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5),
+    # strip.text.y = element_text(angle = 0),
+    legend.position = "bottom"
+  )
+  
+```
+There are clear patterns in the data, hinting at the participants' arms :)
+However, this also suggests that there might be quite a lot of false positive and a low specificity for the qPCR probes.
 
 ```{r}
 #| fig-width: 7
 #| fig-height: 3.5
 
 qpcr |> 
-  filter(
+  dplyr::filter(
     sample_type %in% c("Clinical sample"), 
-    sample_category %in% c("Expected sample"),
-    visit_code %in% c(seq(1000, 1900, by = 100), 2120),
+    # sample_category %in% c("Expected sample"),
+    mg_visit_code %in% c(seq(1000, 1900, by = 100), 2120),
     target == "16S"
     ) |>  
-  arrange(pid, visit_code) |> 
-  select(pid, visit_code, copies_per_swab_adj_median) |>
+  arrange(mg_pid, mg_visit_code) |> 
+  select(mg_pid, mg_visit_code, copies_per_swab_adj_median) |>
   distinct() |> 
   ggplot() +
-  aes(x = visit_code, y = copies_per_swab_adj_median, col = pid) +
+  aes(x = mg_visit_code, y = copies_per_swab_adj_median, col = mg_pid) +
   geom_boxplot(alpha = 0.2, fill = "dodgerblue1", color = "dodgerblue1") +
-  geom_line(aes(group = pid), alpha = 0.2) +
+  geom_line(aes(group = mg_pid), alpha = 0.2) +
   # geom_point(size = 0.5) +
   ggbeeswarm::geom_quasirandom(width = 0.2) +
   scale_y_log10() +
@@ -1586,6 +1986,194 @@ qpcr |>
   
 ```
 
+
+## Specificity and sensitivity estimation from Mock positive controls and from screening visits samples
+
+In this section, we use the **biological controls** (Mock samples) to estimate the sensitivity (true positive rate) of the qPCR assays and the screening visit samples to estimate the specificity (false positive rate).
+
+Our true positive samples are the Mock samples since they contain, among other strains, the 15 LBP strains. 
+
+The relative abundance of each LBP strains in Mock 1 samples should be around 1/100, while in Mock 2 samples, it should be around 1/24.
+
+
+Unfortunately, we do not have a good biological negative sample (*e.g.*, a pool of non-LBP strains), so we use the screening visit samples as our "true negative samples", acknowledging that some of these samples might contain native *L. crispatus* that may be very closely related to one of the LBP strains. 
+
+
+```{r}
+
+
+tmp <- 
+  qpcr |> 
+  dplyr::filter(
+    (sample_type == "Positive control") | ((mg_visit_code <= 1000) & (sample_type == "Clinical sample"))
+  ) |> 
+  select(
+    uid, mg_visit_code, sample_type, control_type, ext_lib_plate_nb, target, strain_group_qpcr, LBP, strain_origin, copies_per_swab_adj_median
+  ) |> 
+  arrange(uid) |> 
+  distinct() |> 
+  mutate(
+    truth = 
+      case_when(
+        str_detect(control_type, "Mock") ~ "P",
+        (mg_visit_code <= 1000) ~ "N",
+        TRUE ~ NA_character_
+      ),
+    predicted = 
+      case_when(
+        copies_per_swab_adj_median > 0 ~ "PP",
+        TRUE ~ "PN"
+      )
+  )
+
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 4
+
+tmp |> 
+  ggplot() +
+  aes(
+    x = sample_type, y = copies_per_swab_adj_median |> asinh(), 
+    col = str_c(sample_type, " ",control_type |> as.character(), " (", truth, ")")
+    ) +
+  facet_grid(. ~ strain_group_qpcr + target) +
+  scale_color_discrete("Control type") + xlab("") +
+  ggbeeswarm::geom_quasirandom(size = 0.7, alpha = 0.8) +
+  theme(
+    strip.text.x = element_text(angle = 90),
+    axis.text.x = element_blank()
+  )
+
+```
+
+```{r}
+
+tmp <- 
+  tmp |> 
+  dplyr::filter(target != "16S") |> 
+  dplyr::left_join(
+    tmp |> 
+      dplyr::filter(target == "16S") |> 
+      select(uid, copies_per_swab_adj_median) |> 
+      dplyr::rename(copies_per_swab_adj_median_16S = copies_per_swab_adj_median),
+    by = join_by(uid)
+  )
+
+```
+
+```{r}
+
+tmp <- 
+  tmp |> 
+  mutate(
+    exp_rel_ab = 
+      case_when(
+        (control_type == "Mock 1") ~ 1 / 100,
+        (control_type == "Mock 2") ~ 1 / 24,
+        TRUE ~ 0
+      ),
+    obs_rel_ab = copies_per_swab_adj_median / copies_per_swab_adj_median_16S
+  )
+
+```
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+
+g <- 
+  tmp |> 
+  ggplot() +
+  aes(
+    x = str_c(LBP, strain_origin, target, sep = " - "), y = obs_rel_ab, 
+    col = str_c(sample_type, " ", control_type, " (", truth, ")")
+  ) +
+  facet_grid(.  ~ sample_type + control_type) + # , scales = "free"
+  geom_hline(aes(yintercept = exp_rel_ab), col = "gray50") +
+  geom_boxplot(alpha = 0, outlier.shape = NA) +
+  geom_point(alpha = 0.3) +
+  scale_color_discrete("Control type") + 
+  ylab("Observed relative abundance") + 
+  xlab("LBP strain") + 
+  labs(
+    caption = "The horizontal lines are the expected relative abundance of each LBP strain in the control samples."
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1)
+  )
+
+g
+
+g + ylim(c(0, 0.25)) 
+
+g + ylim(c(0, 0.05)) 
+```
+
+
+
+
+
+```{r}
+
+tmp |> 
+  group_by(target, strain_group_qpcr, LBP, strain_origin) |>
+  summarize(
+    `n True Negatives` = sum(truth == "N" & predicted == "PN"),
+    `n Negatives` = sum(truth == "N"),
+    specificity = `n True Negatives` / `n Negatives`,
+    `n True Positives` = sum(truth == "P" & predicted == "PP"),
+    `n Positives` = sum(truth == "P"),
+    sensitivity = sum(truth == "P" & predicted == "PP") / sum(truth == "P"),
+    .groups = "drop"
+  ) |> 
+  arrange(strain_group_qpcr, target) |> 
+  gt(caption = "Specificity and sensitivity of the qPCR assays for the LBP targets") |>
+  cols_label(
+    specificity ~ "Specificity (%) [likely underestimated]",
+    sensitivity ~ "Sensitivity (%)",
+    strain_origin ~ "Strain origin",
+    strain_group_qpcr ~ "qPCR group",
+    target ~ "Target (LBP strain)"
+  ) |>
+  fmt_number(
+    columns = c(specificity, sensitivity),
+    decimals = 2,
+    scale_by = 100
+  ) 
+
+```
+
+```{r}
+#| fig-width: 8
+#| fig-height: 4
+
+tmp |> 
+  dplyr::filter(sample_type == "Clinical sample") |> 
+  mutate(
+    site = case_when(
+      str_detect(uid, "06810") ~ "MGH",
+      str_detect(uid, "06820") ~ "CAP",
+      TRUE ~ "Other"
+    )
+  ) |> 
+  ggplot() +
+  aes(
+    x = site, y = copies_per_swab_adj_median |> asinh(), 
+    col = site
+    ) +
+  facet_grid(. ~ strain_origin + target) +
+  scale_color_manual("Study site", values = site_colors) + 
+  ggbeeswarm::geom_quasirandom(size = 0.7, alpha = 0.8) +
+  theme(
+    strip.text.x = element_text(angle = 90),
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+  )
+
+```
+
+It looks like there might be a mild correlation between strain origin and study site for screening visit samples.
 
 
 ## Creating `SummarizedExperiment` objects
@@ -1616,8 +2204,6 @@ The `colData` contains the following columns:
   
   + `qpcr_uid` (the qPCR specific unique identifier)
   + `uid` (the VIBRANT cross-assay unique sample identifier)
-  + `pid` (the participant ID)
-  + `visit_code` (the visit code)
   + `qpcr_sample_id`
   + `vibr_sample_id`
   + `qpcr_sample_type`
@@ -1646,7 +2232,26 @@ qpcr |> dplyr::count(qpcr_uid) |> dplyr::count(n)
 qpcr |> dplyr::count(qpcr_uid) |> nrow()
 
 
-qpcr |> dplyr::count(qpcr_uid) |> filter(n != 16) |> View()
+qpcr |> dplyr::count(qpcr_uid) |> dplyr::filter(n != 16) |> View()
+
+qpcr |> 
+  select(
+    qpcr_uid, 
+    uid, mg_pid, mg_visit_code,
+    qpcr_sample_type,  sample_type, control_type, 
+    qpcr_sample_id, vibr_sample_id, replicate_nb, 
+    ext_lib_plate_nb, ext_lib_plate_id
+  ) |> 
+  distinct() |> 
+  group_by(qpcr_uid) |> mutate(n = n()) |> ungroup() |> 
+  dplyr::filter(n > 1) |> 
+  arrange(qpcr_uid)
+
+qpcr |> 
+  dplyr::filter(qpcr_sample_id == "1588") |> 
+  select(qpcr_sample_id, qpcr_uid, pcr_plate_id, well_row, well_col, ext_lib_plate_nb, ext_lib_plate_id, target) |> 
+  arrange(target, pcr_plate_id,  qpcr_uid, well_row, well_col) |> 
+  View()
 
 ```
   
@@ -1726,10 +2331,10 @@ make_raw_qpcr_SE <- function(qpcr){
      qpcr |> 
      select(
        qpcr_uid, 
-       uid, pid, visit_code, location,
+       uid, mg_pid, mg_visit_code,
        qpcr_sample_type,  sample_type, control_type, 
        qpcr_sample_id, vibr_sample_id, replicate_nb, 
-       ext_lib_plate_nb, ext_lib_plate_id
+       ext_lib_plate_nb #, ext_lib_plate_id
        ) |> 
      distinct() |> 
      arrange(qpcr_uid) |> 
@@ -1737,7 +2342,7 @@ make_raw_qpcr_SE <- function(qpcr){
      mutate(rownames = qpcr_uid) |> 
      column_to_rownames("rownames") 
   
-   
+
     # ROWDATA
    rowdata <-
      qpcr |> 
@@ -1792,6 +2397,8 @@ make_raw_qpcr_SE <- function(qpcr){
 ```
 
 
+
+
 ```{r}
 
 SE_qPCR_raw <- make_raw_qpcr_SE(qpcr)
@@ -1821,7 +2428,7 @@ agg_qpcr_SE <- function(SE_qPCR_raw){
   
   filtered_qpcr <- 
     SE_qPCR_raw |> 
-    filter(
+    dplyr::filter(
       !(qpcr_sample_type %in% c("Standard", "Water", "Empty")),
       !is.na(uid) 
       ) 
@@ -1842,20 +2449,40 @@ agg_qpcr_SE <- function(SE_qPCR_raw){
     mutate(
       copies_per_swab_cv = ifelse(copies_per_swab_sd == 0, 0, copies_per_swab_sd / copies_per_swab_mean)
     ) 
+
+  # COLDATA
+  coldata <- 
+    filtered_qpcr |> 
+    colData() |> 
+    as.data.frame() |> 
+    as_tibble() |> 
+    select(-qpcr_uid, -replicate_nb, -starts_with("ext_lib")) |> 
+    distinct() |>  
+    arrange(uid)
   
-    # COLDATA
-   coldata <- 
-     filtered_qpcr |> 
-     colData() |> 
-     as.data.frame() |> 
-     as_tibble() |> 
-     select(-qpcr_uid, -replicate_nb) |> 
-     distinct() |>  
-     arrange(uid) |> 
-     as.data.frame() |> 
-     mutate(rownames = uid) |> 
-     column_to_rownames("rownames")
-   
+  coldata <-  
+    coldata |> 
+    dplyr::left_join(
+      filtered_qpcr |> 
+        colData() |> 
+        as.data.frame() |> 
+        as_tibble() |> 
+        select(uid, starts_with("ext_lib")) |> 
+        group_by(uid) |> 
+        summarize(
+          ext_lib_plate_nb = str_c(ext_lib_plate_nb |> unique() |> sort(), collapse = ", "),
+          # ext_lib_plate_id = str_c(ext_lib_plate_id |> str_replace_na("unknown") |> unique() |> sort(), collapse = ", "),
+          .groups = "drop"
+        ),
+      by = join_by(uid)
+    )
+  
+   coldata <-  
+    coldata |> 
+    as.data.frame() |> 
+    mutate(rownames = uid) |> 
+    column_to_rownames("rownames")
+  
   # ROWDATA
    rowdata <-
      filtered_qpcr |> 
@@ -1921,6 +2548,18 @@ SE_qPCR_agg
 
 ## Save `SummarizedExperiment` objects
 
+We first check that the `SE_qPCR_agg` object is formatted as it should for its integration in the `MAE`.
+
+```{r}
+
+# We remove `mg_pid` and `mg_visit_code` from the colData to avoid conflict when merging with the metagenomics data.
+colData(SE_qPCR_agg) <- colData(SE_qPCR_agg)[, -which(colnames(colData(SE_qPCR_agg)) %in% c("mg_pid", "mg_visit_code"))]
+# We check that the `SE_qPCR_agg` object is formatted as it should
+SE_qPCR_agg <- check_se(SE_qPCR_agg)
+
+```
+
+
 Save the `SE` objects to disk
 
 ```{r}
@@ -1928,7 +2567,7 @@ Save the `SE` objects to disk
 saveRDS(
   SE_qPCR_raw, 
   str_c(
-    get_output_dir(data_source = data_source),  
+    get_01_output_dir(),  
     "03_se_pcr_raw_", today() |> str_remove_all("-"), ".rds"
     )
   )
@@ -1937,7 +2576,7 @@ saveRDS(
 saveRDS(
   SE_qPCR_agg, 
   str_c(
-    get_output_dir(data_source = data_source),  
+    get_01_output_dir(),  
     "03_se_pcr_agg_", today() |> str_remove_all("-"), ".rds"
     )
   )

@@ -1,6 +1,6 @@
 ---
 title: "Flow Cytometry"
-author: Susan, Joseph, Josh, Laura, ....???
+author: Susan Holmes, Laura Symul
 date: today
 format: 
    html:
@@ -11,7 +11,7 @@ format:
      toc-depth: 5
      embed-resources: true
 execute:
-  cache: refresh # true refresh false
+  cache: true # true refresh false
   warning: false
 knitr:
   opts_chunk:
@@ -21,6 +21,7 @@ editor: source
 
 ```{r}
 #| warning: false
+#| cache: false
 
 library(tidyverse)
 library(magrittr)
@@ -28,10 +29,1175 @@ library(gt)
 library(patchwork)
 library(SummarizedExperiment)
 library(tidySummarizedExperiment)
+library(flowCore)
+library(flowWorkspace)
+library(CytoML)
+library(ggcyto)
 
-tmp <- fs::dir_map("R Luminex/", source)
+tmp <- fs::dir_map("R scripts/", source)
+tmp <- fs::dir_map("R scripts Flow/", source)
+rm(tmp)
+
+```
+
+```{r}
+#| cache: false
 
 theme_set(theme_light())
 ```
 
 
+```{r}
+
+flow_dir <- str_c(get_data_dir(), "06 Flow cytometry/")
+output_dir <- 
+  str_c(
+    get_01_output_dir(),
+    "06 Flow cytometry tmp files/"
+    )
+
+if (!dir.exists(output_dir)){
+  dir.create(output_dir, recursive = TRUE)
+}
+
+```
+
+:::callout-important
+The extraction functions will need to be modified to extract the number of total immune cells and compute the percentages of children populations out of total immune cells.
+This will be done later.
+:::
+
+
+# MGH Flow data
+
+## Step 1: Creating the file inventory
+
+This step parse the MGH flow cytometry data directory structure to create an inventory of WSP and FCS files that are relevant for the analysis. It looks for WSP files that contain "068" in their names and matches them with corresponding FCS files in the same directory.
+
+```{r}
+
+base_dir <- str_c(flow_dir, "MGH/")
+out_dir <- str_c(output_dir, "MGH/step 01")
+
+# Create output directory if it doesn't exist
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE)
+}
+
+# Find all WSP files in the entire directory structure
+all_wsp_files <- list.files(base_dir, pattern = "\\.wsp$", recursive = TRUE, full.names = TRUE)
+cat("Total WSP files found:", length(all_wsp_files), "\n")
+
+# Focus on WSP files that contain "068" 
+relevant_wsp_files <- all_wsp_files[grepl("068", all_wsp_files)]
+cat("WSP files related to 068 samples:", length(relevant_wsp_files), "\n")
+
+# Initialize vectors for valid files
+valid_wsp_files <- character(0)
+valid_fcs_files <- character(0)
+
+# For each WSP file, find corresponding FCS file with MGH_Cyto_068 pattern in the same folder
+for (wsp_file in relevant_wsp_files) {
+  wsp_dir <- dirname(wsp_file)
+  
+  # Look for FCS files in the same directory with MGH_Cyto_068 pattern
+  matching_fcs <- list.files(wsp_dir, pattern = "MGH_Cyto_068.*\\.fcs$", full.names = TRUE)
+  
+  # If we found matching FCS files
+  if (length(matching_fcs) > 0) {
+    # Take the first match (should typically be only one per folder)
+    valid_wsp_files <- c(valid_wsp_files, wsp_file)
+    valid_fcs_files <- c(valid_fcs_files, matching_fcs[1])
+    
+    cat("Found: WSP:", basename(wsp_file), "→ FCS:", basename(matching_fcs[1]), "\n")
+  } else {
+    # Try a more relaxed pattern if the strict one doesn't match
+    relaxed_fcs <- list.files(wsp_dir, pattern = ".*068.*\\.fcs$", full.names = TRUE)
+    
+    if (length(relaxed_fcs) > 0) {
+      # Prefer files with MGH or Cyto in the name if available
+      mgh_matches <- relaxed_fcs[grepl("MGH|Cyto", relaxed_fcs)]
+      if (length(mgh_matches) > 0) {
+        valid_wsp_files <- c(valid_wsp_files, wsp_file)
+        valid_fcs_files <- c(valid_fcs_files, mgh_matches[1])
+        
+        cat("Found (relaxed): WSP:", basename(wsp_file), "→ FCS:", basename(mgh_matches[1]), "\n")
+      } else {
+        valid_wsp_files <- c(valid_wsp_files, wsp_file)
+        valid_fcs_files <- c(valid_fcs_files, relaxed_fcs[1])
+        
+        cat("Found (very relaxed): WSP:", basename(wsp_file), "→ FCS:", basename(relaxed_fcs[1]), "\n")
+      }
+    } else {
+      cat("No matching FCS found for:", basename(wsp_file), "in", wsp_dir, "\n")
+    }
+  }
+}
+
+# Create inventory data frame
+inventory <- data.frame(
+  wsp_file = valid_wsp_files,
+  fcs_file = valid_fcs_files,
+  folder = dirname(valid_wsp_files),
+  stringsAsFactors = FALSE
+)
+
+# Print summary
+cat("\n\nFound", nrow(inventory), "valid samples with both WSP and FCS files\n")
+
+# Display first few entries if any found
+if (nrow(inventory) > 0) {
+  print(head(inventory))
+}
+
+write.csv(inventory, file.path(out_dir, "mgh_sample_inventory.csv"), row.names = FALSE)
+saveRDS(valid_wsp_files, file.path(out_dir, "valid_wsp_files.rds"))
+saveRDS(valid_fcs_files, file.path(out_dir, "valid_fcs_files.rds"))
+
+cat("\nInventory saved to:", file.path(out_dir, "mgh_sample_inventory.csv"), "\n")
+cat("WSP file vector saved to:", file.path(out_dir, "valid_wsp_files.rds"), "\n")
+cat("FCS file vector saved to:", file.path(out_dir, "valid_fcs_files.rds"), "\n")
+
+# cat(" There are in fact 86 sample folders in the MGH directory \n")
+
+rm(inventory, valid_fcs_files, valid_wsp_files, all_wsp_files, relevant_wsp_files, wsp_file, wsp_dir, matching_fcs, relaxed_fcs, mgh_matches)
+
+```
+
+
+## Step 2: Verify file data
+
+
+```{r directories}
+# Set base directory and output directory
+out_dir <- str_c(output_dir, "MGH/step 02")
+
+# Create output directory if it doesn't exist
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir)
+}
+```
+
+For MGH samples, we need to load the list of samples along with the machine that was used for each sample. This is provided in the `MGH_sample_list_with_machine_no_dates.csv` file, which contains the expected visit codes and sample IDs.
+
+```{r}
+
+mgh_samples <- read_csv(file = str_c(get_data_dir(), "06 Flow cytometry/MGH_sample_list_with_machine_no_dates.csv"))
+mgh_samples |> head()
+
+```
+
+
+
+```{r readDataFiles}
+
+inventory <- read.csv(str_c(output_dir,"MGH/step 01/mgh_sample_inventory.csv"), stringsAsFactors = FALSE, strip.white = TRUE)
+
+# First, let's examine the Visit column to see what we're working with
+cat("Unique Visit values in the data:\n")
+print(unique(mgh_samples$Visit))
+
+# Process MGH samples to create expected sample patterns
+mgh_expected <- 
+  mgh_samples |> 
+  mutate(
+    # Remove all whitespace and standardize sample ID
+    Subject = gsub("\\s+", "", trimws(Subject)),
+    # Standardize the Visit field
+    Visit_orig = Visit,
+    Visit = sapply(Visit, process_visit),
+    sample_id = gsub("-", "_", Subject),
+    # Create the expected filename pattern with the correct visit code
+    visit_code = sapply(Visit, get_visit_code),
+    expected_pattern = paste0("MGH_", sample_id, "_", Visit, "_", visit_code)
+  )
+
+# Display the Visit standardization results
+cat("\nSample of Visit standardization:\n")
+print(head(mgh_expected |> select(Subject, Visit_orig, Visit, visit_code)))
+
+# Process the inventory to extract all possible identifiers using vectorized operations
+inventory_processed <- 
+  inventory |> 
+  mutate(
+    # Extract identifiers from different fields
+    folder_id = extract_sample_info(folder),
+    wsp_id = extract_sample_info(wsp_file),
+    fcs_id = extract_sample_info(fcs_file)
+  )
+
+# Add combined identifiers field
+inventory_processed <- 
+  inventory_processed |> 
+  mutate(
+    # Combine all identifiers for maximum matching potential
+    all_ids = paste(folder_id, wsp_id, fcs_id, sep = "|")
+  )
+
+# Show the extracted IDs for verification
+cat("Sample of extracted identifiers from inventory:\n")
+print(head(inventory_processed |> select(folder_id, wsp_id, fcs_id)))
+
+# Find which expected samples are missing from the inventory
+missing_samples <- 
+  mgh_expected |> 
+  rowwise() |> 
+  mutate(
+    found = check_sample_exists(
+      sample_id, 
+      Visit, 
+      visit_code, 
+      inventory_processed
+    )
+  ) |> 
+  dplyr::filter(!found) |> 
+  ungroup()
+
+# Print summary of results
+cat("\nInventory sample count:", nrow(inventory), "\n")
+cat("Expected MGH sample count:", nrow(mgh_expected), "\n")
+cat("Missing samples count:", nrow(missing_samples), "\n")
+
+# Print the missing samples
+cat("\nMissing samples:\n")
+print(missing_samples %>% select(Subject, Visit_orig, Visit, visit_code, expected_pattern))
+
+# Optional: Save the missing samples to a CSV
+write.csv(missing_samples, str_c(out_dir, "/missing_mgh_samples.csv"), row.names = FALSE)
+
+# For verification, let's print samples that were found
+found_samples <- mgh_expected %>%
+  anti_join(missing_samples, by = c("Subject", "Visit"))
+
+cat("\nSample of found samples (first 10):\n")
+print(head(found_samples %>% select(Subject, Visit_orig, Visit, visit_code, expected_pattern), 10))
+
+# Additional analysis: Group by Subject and Visit to identify patterns
+if (nrow(missing_samples) > 0){
+  missing_by_subject <- 
+    missing_samples |> 
+    group_by(Subject) |> 
+    summarize(
+      visits_missing = paste(Visit, collapse = ", "),
+      count = n()
+    ) |> 
+    arrange(desc(count))
+  
+  cat("\nMissing samples by subject:\n")
+  print(missing_by_subject)
+  rm(missing_by_subject)
+}
+
+```
+
+
+```{r}
+
+# Extract standardized information from inventory folders
+inventory_standardized <- 
+  inventory |> 
+  mutate(
+    folder_name = basename(folder),
+    # Extract subject ID, visit, and visit code from folder name
+    subject_id = str_extract(folder_name, "[0-9]{3}_[0-9]{2}_[0-9]{4}"),
+    visit = str_extract(folder_name, "V[0-9]"),
+    visit_code = str_extract(folder_name, "[0-9]{4}$"),
+    # Create a standardized pattern for comparison
+    std_pattern = paste0(subject_id, "_", visit, "_", visit_code)
+  )
+
+# Print inventory count
+cat("Inventory folder count:", nrow(inventory_standardized), "\n")
+
+# Process the matched samples from our expected list
+matched_samples <- 
+  mgh_expected |> 
+  rowwise() |> 
+  mutate(
+    # Create a function to check each sample individually
+    matched_to_inventory = any(str_detect(
+      inventory_standardized$folder_name, 
+      fixed(sample_id, ignore_case = TRUE)
+    ) & str_detect(
+      inventory_standardized$folder_name, 
+      fixed(Visit, ignore_case = TRUE)
+    ))
+  ) |> 
+  ungroup()
+
+# Count the matched samples
+matched_count <- sum(matched_samples$matched_to_inventory)
+cat("Matched samples count:", matched_count, "\n")
+
+# Let's directly compare the folder names in inventory with our expected patterns
+# First, create a list of standardized folder names from inventory
+inventory_folders <- 
+  inventory_standardized |> 
+  mutate(
+    # Create several variations of the folder name for flexible matching
+    pattern1 = paste0("MGH_", subject_id, "_", visit, "_", visit_code),
+    pattern2 = paste0(subject_id, "_", visit, "_", visit_code),
+    pattern3 = paste0(subject_id, "_", visit)
+  ) |> 
+  select(folder, folder_name, pattern1, pattern2, pattern3)
+
+# Let's directly list all the folder names
+cat("\n=== All Inventory Folder Names ===\n")
+for (i in 1:nrow(inventory_folders)) {
+  cat(i, ": ", inventory_folders$folder_name[i], "\n", sep="")
+}
+
+# Let's also list all the expected patterns
+cat("\n=== All Expected Sample Patterns ===\n")
+for (i in 1:nrow(mgh_expected)) {
+  cat(i, ": ", mgh_expected$expected_pattern[i], " (", mgh_expected$Subject[i], ", ", mgh_expected$Visit[i], ")\n", sep="")
+}
+
+# Now let's try a different approach - let's extract the Subject and Visit from the folder names
+# and directly match them to our expected Subject and Visit combinations
+inventory_parsed <- 
+  inventory_standardized |> 
+  mutate(
+    # Extract just the numeric part of the subject ID
+    subject_base = str_extract(subject_id, "[0-9]{3}_[0-9]{2}_[0-9]{4}"),
+    # Convert to the format with hyphens for direct comparison
+    subject_with_hyphens = gsub("_", "-", subject_base)
+  )
+
+# Create a direct comparison table
+comparison <- 
+  expand.grid(
+    inventory_idx = 1:nrow(inventory_parsed),
+    expected_idx = 1:nrow(mgh_expected),
+    stringsAsFactors = FALSE
+  ) |> 
+  mutate(
+    inventory_subject = inventory_parsed$subject_with_hyphens[inventory_idx],
+    inventory_visit = inventory_parsed$visit[inventory_idx],
+    expected_subject = mgh_expected$Subject[expected_idx],
+    expected_visit = mgh_expected$Visit[expected_idx],
+    # Check if this is a match
+    is_match = (inventory_subject == expected_subject) & (inventory_visit == expected_visit)
+  ) |> 
+  dplyr::filter(is_match)
+
+# Count the number of unique inventory folders and expected samples that have matches
+unique_inventory_matched <- length(unique(comparison$inventory_idx))
+unique_expected_matched <- length(unique(comparison$expected_idx))
+
+cat("\n=== Direct Matching Results ===\n")
+cat("Unique inventory folders matched:", unique_inventory_matched, "out of", nrow(inventory), "\n")
+cat("Unique expected samples matched:", unique_expected_matched, "out of", nrow(mgh_expected), "\n")
+
+# List inventory folders that don't match any expected sample
+unmatched_inventory <- setdiff(1:nrow(inventory_parsed), unique(comparison$inventory_idx))
+cat("\nInventory folders with no match in expected samples:", length(unmatched_inventory), "\n")
+if (length(unmatched_inventory) > 0) {
+  cat("Unmatched inventory folders:\n")
+  for (idx in unmatched_inventory) {
+    cat("  ", inventory_parsed$folder_name[idx], " (Subject: ", 
+        inventory_parsed$subject_with_hyphens[idx], ", Visit: ", 
+        inventory_parsed$visit[idx], ")\n", sep="")
+  }
+}
+
+# List expected samples that don't match any inventory folder
+unmatched_expected <- setdiff(1:nrow(mgh_expected), unique(comparison$expected_idx))
+cat("\nExpected samples with no match in inventory:", length(unmatched_expected), "\n")
+if (length(unmatched_expected) > 0) {
+  cat("Unmatched expected samples:\n")
+  for (idx in unmatched_expected) {
+    cat("  ", mgh_expected$expected_pattern[idx], " (Subject: ", 
+        mgh_expected$Subject[idx], ", Visit: ", 
+        mgh_expected$Visit[idx], ")\n", sep="")
+  }
+}
+
+```
+We create a "cleaned" inventory with harmonized `pid` and `visit_code`.
+
+```{r}
+
+inventory_cleaned <- 
+  inventory_standardized |> 
+  mutate(
+    pid = subject_id |> str_remove_all("_")
+  ) |> 
+  select(folder_name, pid, subject_id, visit, visit_code, folder, wsp_file, fcs_file)
+
+```
+
+In addition, for three V9 samples (from participants 068100061, 068100062, and 068100063) the flow cytometry protocol has been ran with missing channels ("BV650-CD19 unavailable this day so it was not used"). Since this will cause problem when extracting the gating structure, we add these missing channels to the inventory so that they can be processed differently at step 3.
+
+
+```{r}
+
+inventory_cleaned <- 
+  inventory_cleaned |> 
+  mutate(
+    missing_channels = 
+      ifelse(
+        (pid %in% c("068100061", "068100062", "068100063")) & (visit == "V9"), 
+         "BV650-A | Comp-BV650-A", 
+        NA_character_
+      )
+  )
+
+```
+
+
+
+```{r}
+
+write.csv(inventory_cleaned, str_c(out_dir, "/mgh_sample_inventory_cleaned.csv"), row.names = FALSE)
+
+```
+
+
+
+```{r}
+
+rm(
+  inventory, inventory_standardized, inventory_processed, inventory_parsed, 
+  inventory_folders, inventory_cleaned,
+  mgh_samples, mgh_expected, 
+  missing_samples, found_samples, comparison, matched_samples
+   )
+
+rm(i, matched_count, unique_expected_matched, unique_inventory_matched, unmatched_expected, unmatched_inventory)
+
+```
+
+
+
+## Step 3: Extracting gating structure
+
+
+```{r step3-directories}
+# Set base directory and output directory
+out_dir <- str_c(output_dir, "MGH/step 03/")
+
+# Create output directory if it doesn't exist
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir)
+}
+```
+
+```{r}
+
+# Run the processing
+# Start with test mode = TRUE to check a few files first
+# If the test looks good, run the full processing with test_mode = FALSE
+results <- 
+  process_inventory(
+    inventory_file = str_c(output_dir, "MGH/step 02/mgh_sample_inventory_cleaned.csv"), 
+    batch_size = 10, 
+    test_mode = FALSE,
+    out_dir = out_dir
+    )
+
+```
+
+
+# CAP Flow data
+
+## Step 1: Creating the file inventory
+
+```{r}
+
+base_dir <- str_c(flow_dir, "reorganized_south_africa_files/")
+out_dir <- str_c(output_dir, "CAP/step 01")
+
+# Create output directory if it doesn't exist
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir, recursive = TRUE)
+}
+
+# Find all WSP files in the entire directory structure
+all_wsp_files <- list.files(base_dir, pattern = "\\.wsp$", recursive = TRUE, full.names = TRUE)
+cat("Total WSP files found:", length(all_wsp_files), "\n")
+
+# Focus on WSP files that contain "068200" 
+relevant_wsp_files <- all_wsp_files[grepl("068200", all_wsp_files)]
+cat("WSP files related to 068200 samples:", length(relevant_wsp_files), "\n")
+
+# Initialize vectors for valid files
+valid_wsp_files <- character(0)
+valid_fcs_files <- character(0)
+
+# For each WSP file, find corresponding FCS file with 068200 pattern in the same folder
+for (wsp_file in relevant_wsp_files) {
+  wsp_dir <- dirname(wsp_file)
+  
+  # Look for FCS files in the same directory with 068200 pattern
+  matching_fcs <- list.files(wsp_dir, pattern = "068200.*\\.fcs$", full.names = TRUE)
+  
+  # If we found matching FCS files
+  if (length(matching_fcs) > 0) {
+    # Take the first match (should typically be only one per folder)
+    valid_wsp_files <- c(valid_wsp_files, wsp_file)
+    valid_fcs_files <- c(valid_fcs_files, matching_fcs[1])
+    
+    cat("Found: WSP:", basename(wsp_file), "→ FCS:", basename(matching_fcs[1]), "\n")
+  } else {
+    # Try a more relaxed pattern if the strict one doesn't match
+    relaxed_fcs <- list.files(wsp_dir, pattern = ".*068200.*\\.fcs$", full.names = TRUE)
+    
+    if (length(relaxed_fcs) > 0) {
+      # Prefer files with 068200 in the name if available
+      sa_matches <- relaxed_fcs[grepl("068|Sample", relaxed_fcs)]
+      if (length(sa_matches) > 0) {
+        valid_wsp_files <- c(valid_wsp_files, wsp_file)
+        valid_fcs_files <- c(valid_fcs_files, mgh_matches[1])
+        
+        cat("Found (relaxed): WSP:", basename(wsp_file), "→ FCS:", basename(sa_matches[1]), "\n")
+      } else {
+        valid_wsp_files <- c(valid_wsp_files, wsp_file)
+        valid_fcs_files <- c(valid_fcs_files, relaxed_fcs[1])
+        
+        cat("Found (very relaxed): WSP:", basename(wsp_file), "→ FCS:", basename(relaxed_fcs[1]), "\n")
+      }
+    } else {
+      cat("No matching FCS found for:", basename(wsp_file), "in", wsp_dir, "\n")
+    }
+  }
+}
+
+# Create inventory data frame
+sa_inventory <- 
+  data.frame(
+    wsp_file = valid_wsp_files,
+    fcs_file = valid_fcs_files,
+    folder = dirname(valid_wsp_files),
+    stringsAsFactors = FALSE
+  )
+
+# Print summary
+cat("\n\nFound", nrow(sa_inventory), "valid samples with both WSP and FCS files\n")
+
+# Display first few entries if any found
+if (nrow(sa_inventory) > 0) {
+  print(head(sa_inventory))
+}
+
+write.csv(sa_inventory, file.path(out_dir, "sa_sample_inventory.csv"), row.names = FALSE)
+saveRDS(valid_wsp_files, file.path(out_dir, "sa_valid_wsp_files.rds"))
+saveRDS(valid_fcs_files, file.path(out_dir, "sa_valid_fcs_files.rds"))
+
+cat("\nInventory saved to:", file.path(out_dir, "sa_sample_inventory.csv"), "\n")
+cat("WSP file vector saved to:", file.path(out_dir, "sa_valid_wsp_files.rds"), "\n")
+cat("FCS file vector saved to:", file.path(out_dir, "sa_valid_fcs_files.rds"), "\n")
+
+# cat(" There are in fact 276 sample folders in the SA directory \n")
+
+```
+
+```{r}
+rm(sa_inventory, valid_wsp_files, valid_fcs_files, wsp_dir, wsp_file, all_wsp_files)
+```
+
+
+
+## Step 2: Verify file data
+
+
+```{r}
+# directories
+sa_base_dir <- str_c(base_dir, "samples")
+out_dir <- str_c(output_dir, "CAP/step 02/")
+
+# Create output directory if it doesn't exist
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir)
+}
+```
+
+
+```{r}
+# Run the processing
+sa_inventory <- process_sa_samples(sa_base_dir, out_dir = out_dir)
+```
+
+
+## Step 3: Extracting gating structure
+
+
+```{r cap-step3-directories}
+# Set base directory and output directory
+out_dir <- str_c(output_dir, "CAP/step 03/")
+
+# Create output directory if it doesn't exist
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir)
+}
+```
+
+```{r}
+
+# Run the processing
+# Start with test mode = TRUE to check a few files first
+# If the test looks good, run the full processing with test_mode = FALSE
+results <- 
+  process_inventory(
+    inventory_file = str_c(output_dir, "CAP/step 02/sa_sample_inventory_cleaned.csv"), 
+    batch_size = 10, 
+    test_mode = FALSE,
+    out_dir = out_dir
+    )
+
+```
+
+# Creating the combined count table
+
+
+```{r}
+# output directory
+out_dir <- str_c(output_dir, "both_combined/")
+# Create output directory if it doesn't exist
+if (!dir.exists(out_dir)) {
+  dir.create(out_dir)
+}
+
+```
+
+Since the gating structure was different at both sites and something within sites for different samples, we load the `gate_mapping_completed.csv` file that Susan created and that contains the harmonized gating structure for all samples. This mapping ensures we can combine the results from both sites correctly.
+
+```{r}
+
+gate_mapping <- 
+  read.csv(
+    str_c(get_data_dir(), "06 Flow cytometry/gate_mapping_completed.csv")
+  )
+
+gate_mapping <- 
+  gate_mapping |> 
+  mutate(
+    site = site |> str_replace("SA", "CAP")
+  )
+
+```
+
+```{r}
+
+gate_mapping |> gt::gt()
+
+
+```
+
+
+```{r}
+
+results <- 
+  aggregate_flow_data(
+    mgh_file = str_c(output_dir, "MGH/step 03/gating_results_all.RData"),
+    sa_file = str_c(output_dir, "CAP/step 03/gating_results_all.RData"), 
+    gate_mapping = gate_mapping, 
+    output_dir = out_dir
+    )
+
+flow_data <- results$all_data
+
+
+# results <- load(str_c(out_dir, "combined_flow_results.RData"), verbose = TRUE)
+# flow_data <- all_data
+
+
+```
+
+For the MGH data, we add the machine
+
+```{r}
+
+get_visit_code <- function(visits){
+  visit_code <- c(
+    "V1" = "1000",
+    "V2" = "1100",
+    "V3" = "1200",
+    "V6" = "1500",
+    "V7" = "1700",
+    "V9" = "2120"
+  ) 
+  visit_codes <- 
+    visit_code |> 
+    as.data.frame() |> 
+    rownames_to_column("visit") |>
+    as_tibble()
+  
+  rm(visit_code)
+  
+  tibble(
+    visit = visits |> str_remove_all("\\s+")
+  ) |> 
+    left_join(
+      visit_codes, by = "visit"
+    ) |> 
+    pull(visit_code)
+}
+
+flow_data <- 
+  flow_data |> 
+  dplyr::left_join(
+    mgh_samples |> 
+      mutate(
+        pid = Subject |> str_remove_all("-") |> str_replace("^068", "68"),
+        visit_code =  get_visit_code(Visit),
+        machine = Machine
+      ) |> 
+      select(pid, visit_code, machine),
+    by = join_by(pid, visit_code)
+  )
+
+```
+
+
+
+
+
+# `SummarizedExperiment` object
+
+## Creating the `SummarizedExperiment` object
+
+We now create a `SummarizedExperiment` object that contains the combined gating results for all samples. This will allow us to integrate the flow cytometry data to the VIBRANT `MultiAssayExperiment` object. 
+
+
+The `features` of the `SE` object will be the harmonized `cell_type`, and the corresponding `rowData` will contain the 
+
+- `parent_cell_type` (to be constructed from the `parent_gate`)
+
+
+The `samples` will be the VIBRANT `uid` (concatenation of `pid` and `visit_code`), and the corresponding `colData` will contain the 
+
+- `sample` name (fcs file)
+- `machine` (for MGH samples, `NA` for CAP samples)
+
+
+The `SE` will contain 2 `assays`
+
+- `count` with the event count for each cell type
+
+- `percentage` with the percentage of each cell type relative to its parent gate
+
+
+In addition, we will add the `gate_mapping` to the `metadata` of the `SE` object, which will allow us to trace back the gating structure for each cell type if needed.
+
+```{r}
+#| warning: true
+
+se_flow <- create_SE_from_harmonized_flow_data(flow_data = flow_data)
+
+# Add metadata for gate mapping
+metadata(se_flow)$gate_mapping <- gate_mapping |> as_tibble()
+    
+```
+
+Since all samples are clinical samples, we add the expected `sample_type` and `control_type` columns to the `SE@colData`.
+
+```{r}
+se_flow@colData$sample_type <- "Clinical sample"
+se_flow@colData$control_type <- ""
+```
+
+
+
+
+## Saving the `SummarizedExperiment` object
+
+```{r}
+
+se_flow_file <- 
+  str_c(
+      output_dir |> str_remove("06 Flow cytometry tmp files/"), 
+      "06_se_flow_", today() |> str_remove_all("-"), ".rds"
+      )
+
+saveRDS(se_flow, file = se_flow_file)
+
+print(str_c("SummarizedExperiment object saved to: ", se_flow_file))
+
+```
+
+
+
+# Checking the agreement between available and expected data
+
+In this section, we check the agreement between the expected data (based on data from CRF 35) and the available data, those for which we have a file (listed in the `inventory`) and those for which we have actual data (found in the `SE`).
+
+```{r}
+
+# Load the CRF data
+
+crf_file <- 
+  list.files(
+    path = get_01_output_dir(), 
+    pattern = "01_crf_clean", 
+    full.names = TRUE
+  ) |> 
+  sort(decreasing = TRUE) |> 
+  magrittr::extract(1)
+  
+load(crf_file, verbose = TRUE)
+
+crf_dict_file <- 
+  list.files(
+    path = get_01_output_dir(), 
+    pattern = "01_crf_plates_dictionary", 
+    full.names = TRUE
+  ) |> 
+  sort(decreasing = TRUE) |> 
+  magrittr::extract(1)
+  
+load(crf_dict_file, verbose = TRUE)
+
+crf35 <- 
+  crf_clean$crf35 |> 
+  select(pid, dfseq, softcup, rectal_swab, endocervical_cytobrush) |> 
+  mutate(
+    visit_code = dfseq |> str_pad(width = 4, pad = "0"),
+    uid = str_c(pid, "_", visit_code)
+    ) 
+
+```
+
+```{r}
+
+# Inventory
+inventory <- 
+  bind_rows(
+    read.csv(str_c(output_dir, "MGH/step 02/mgh_sample_inventory_cleaned.csv"), stringsAsFactors = FALSE) |> 
+      as_tibble() |> 
+      select(pid, visit_code),
+    read.csv(str_c(output_dir, "CAP/step 02/sa_sample_inventory_cleaned.csv"), stringsAsFactors = FALSE) |> 
+      as_tibble() |> 
+      select(pid, visit_code)
+  ) |> 
+  mutate(
+    pid = str_c("0", pid),
+    visit_code = visit_code |> as.character(),
+    uid = str_c(pid, "_", visit_code)
+  ) |> 
+  distinct()
+
+```
+
+
+
+```{r}
+
+se_flow$pid <- se_flow$uid |> str_remove("_.*$") |> as.character()
+se_flow$visit_code <- se_flow$uid |> str_remove(".*_") |> as.character()
+se_flow$site <- ifelse(str_detect(se_flow$pid, "^06810"), "MGH", "CAP")
+
+```
+
+
+```{r}
+
+# Available data
+in_se <- se_flow@colData |> as_tibble()
+
+```
+
+
+```{r}
+
+matched <- 
+  full_join(
+    crf35 |> mutate(in_CRF_35 = TRUE),
+    inventory |> mutate(in_inventory = TRUE),
+    by = join_by(pid, visit_code, uid)
+  ) |> 
+  full_join(in_se |> mutate(in_se = TRUE), by = join_by(pid, visit_code, uid)) |> 
+  mutate(
+    endocervical_cytobrush = endocervical_cytobrush |> str_replace_na(""),
+    cytobrush_collected = endocervical_cytobrush == "Checked",
+    in_CRF_35 = in_CRF_35 |> replace_na(FALSE),
+    in_inventory = in_inventory |> replace_na(FALSE),
+    in_se = in_se |> replace_na(FALSE)
+  )
+
+
+matched <- 
+  matched |> 
+  dplyr::filter(cytobrush_collected | in_inventory | in_se)
+
+matched <- 
+  matched |> 
+  mutate(
+    data_status = 
+      case_when(
+        in_inventory & in_se ~ "Available data",
+        in_inventory & !in_se ~ "In inventory but no data",
+        !in_inventory & !in_se & (as.integer(visit_code) < 1000) ~ "No data (screening visit)",
+        !in_inventory & !in_se ~ "No data"
+      )
+  )
+
+matched <- 
+  matched |> 
+  select(-dfseq, -in_CRF_35) |> 
+  select(site, pid, visit_code, softcup, rectal_swab, endocervical_cytobrush, cytobrush_collected, everything()) |>
+  arrange(data_status, visit_code)
+
+
+```
+
+```{r}
+#| fig-width: 12
+#| fig-height: 3
+
+matched |> 
+  ggplot() +
+  aes(x = pid, y = visit_code, col = data_status, shape = cytobrush_collected) +
+  geom_point() +
+  scale_shape_manual(
+    "Cytobrush collected\naccording to CRF 35", values = c(1, 16)
+    ) +
+  scale_color_manual(
+    "Data status",
+    values = c("Available data" = "dodgerblue", "In inventory but no data" = "orange", "No data" = "red", "No data (screening visit)" = "gray")
+    ) +
+  theme(
+    axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5)
+  ) +
+  ylab("visit code")
+  
+```
+
+```{r}
+
+write_csv(
+  matched, 
+  str_c(output_dir, "flow_data_availability_check.csv")
+)
+
+```
+
+The samples for which we are missing data are
+
+```{r}
+
+matched |> 
+  dplyr::filter(data_status == "In inventory but no data" | data_status == "No data") |>
+  select(-site) |> 
+  gt::gt()
+
+```
+
+
+
+
+
+
+# Basic QC of available data
+
+
+## Counts
+
+```{r}
+#| fig-width: 10
+#| fig-height: 4
+
+se_flow |> 
+  as_tibble() |>
+  group_by(uid) |> 
+  mutate(live_count = count[cell_type_label == "Live cells"]) |> 
+  ungroup() |> 
+  mutate(uid = uid |> fct_reorder(live_count)) |> 
+  ggplot() +
+  aes(x = uid, y = cell_type_label |> fct_rev(), fill = count |> log10()) +
+  facet_grid(parent_cell_type ~ site, scales = "free", space = "free") +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "dodgerblue1", na.value = "red") +
+  theme(
+    axis.text.x = element_blank(),
+    strip.text.y = element_text(angle = 0)
+    ) +
+  xlab("Samples (ordered by live cell counts)") +
+  ylab("Cell type") +
+  labs(
+    caption = "Red cells indicate 0 count. Vertical facets show parent cell types."
+  )
+
+```
+
+
+```{r}
+#| fig-width: 12
+#| fig-height: 4
+
+se_flow |> 
+  as_tibble() |>
+  group_by(uid) |> 
+  mutate(live_count = count[cell_type_label == "Live cells"]) |> 
+  ungroup() |> 
+  mutate(uid = uid |> fct_reorder(live_count)) |> 
+  ggplot() +
+  aes(x = uid, y = cell_type_label |> fct_rev(), fill = count |> log10()) +
+  facet_grid(parent_cell_type ~ site + visit_code, scales = "free", space = "free") +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "dodgerblue1", na.value = "red") +
+  theme(
+    axis.text.x = element_blank(),
+    strip.text.x = element_text(angle = 90),
+    strip.text.y = element_text(angle = 0)
+  ) +
+  xlab("Samples (ordered by live cell counts)") +
+  ylab("Cell type") +
+  labs(
+    caption = "Red cells indicate 0 count. Vertical facets show parent cell types."
+  )
+
+```
+
+
+
+
+```{r}
+#| fig-width: 10
+#| fig-height: 5
+
+se_flow |> 
+  as_tibble() |>
+  ggplot() +
+  aes(x = visit_code |> as.integer(), y = count |> log10(), col = site) +
+  facet_wrap(. ~ cell_type_label, scales = "free_y", nrow = 2) +
+  geom_line(aes(group = pid), alpha = 0.25) + geom_point(alpha = 0.5, size = 0.5) +
+  # guides(col = "none") +
+  xlab("Visit code") 
+
+```
+
+It does not look like there is any participant-effect in the cell counts. The strong variability in total live cell appear to be explained by other factors than participants and visits.
+
+:::callout-warning
+There are lots of cell types with extremely low (sometimes 0) counts. Percentages should be interpreted with a lot of caution in these cases and not used as is for downstream analyses (using a Poisson or NB model will probably be necessary). 
+::: 
+
+```{r}
+
+se_flow |> 
+  as_tibble() |> 
+  group_by(.sample) |> 
+  mutate(
+    flag = 
+      any(
+        ((.feature == "Live") & (count < 10000)) | 
+          ((.feature == "APC") & (count == 0))
+      )
+  ) |> 
+  ungroup() |> 
+  dplyr::filter(flag) |> 
+  select(.feature, .sample, count) |> 
+  pivot_wider(
+    names_from = .feature, 
+    values_from = count
+  ) |> 
+  arrange(Live) |> gt()
+
+```
+
+
+
+
+
+
+
+
+## Percentages
+
+```{r}
+#| fig-width: 10
+#| fig-height: 4
+
+se_flow |> 
+  as_tibble() |>
+  group_by(uid) |> 
+  mutate(live_perc = percentage[cell_type_label == "Granulocytes"]) |> 
+  ungroup() |> 
+  mutate(uid = uid |> fct_reorder(live_perc)) |> 
+  ggplot() +
+  aes(x = uid, y = cell_type_label |> fct_rev(), fill = percentage) +
+  facet_grid(parent_cell_type ~ site + machine, scales = "free", space = "free") +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "dodgerblue1", na.value = "red") +
+  theme(
+    axis.text.x = element_blank(),
+    strip.text.y = element_text(angle = 0)
+    ) +
+  xlab("Samples (ordered by granulocytes percentage)") +
+  ylab("Cell type") +
+  labs(
+    caption = "Red cells indicate NA values. Vertical facets show parent cell types."
+  )
+
+```
+
+
+```{r}
+#| fig-width: 12
+#| fig-height: 4
+
+se_flow |> 
+  as_tibble() |>
+  group_by(uid) |> 
+  mutate(live_perc = percentage[cell_type_label == "Granulocytes"]) |> 
+  ungroup() |> 
+  mutate(uid = uid |> fct_reorder(live_perc)) |> 
+  ggplot() +
+  aes(x = uid, y = cell_type_label |> fct_rev(), fill = percentage) +
+  facet_grid(parent_cell_type ~ site + visit_code, scales = "free", space = "free") +
+  geom_tile() +
+  scale_fill_gradient(low = "white", high = "dodgerblue1", na.value = "red") +
+  theme(
+    axis.text.x = element_blank(),
+    strip.text.x = element_text(angle = 90),
+    strip.text.y = element_text(angle = 0)
+  ) +
+  xlab("Samples (ordered by live cell counts)") +
+  ylab("Cell type") +
+  labs(
+    caption = "Red cells indicate 0 count. Vertical facets show parent cell types."
+  )
+
+```
+
+
+
+
+```{r}
+#| fig-width: 10
+#| fig-height: 5
+
+se_flow |> 
+  as_tibble() |>
+  ggplot() +
+  aes(x = visit_code |> as.integer(), y = percentage, col = site) +
+  facet_wrap(. ~ cell_type_label, scales = "free_y", nrow = 2) +
+  geom_line(aes(group = pid), alpha = 0.25) + 
+  geom_point(alpha = 0.5, size = 0.5) +
+  # guides(col = "none") +
+  xlab("Visit code") 
+
+```
+
+Granulocytes decreased at visit 1500 and 2120, and CD40 increased... We'll see in the integrated analyses whether these changes are explained by colonization.
+
+
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+
+se_flow |> 
+  as_tibble() |> 
+  dplyr::filter(!is.na(percentage)) |> 
+  ggplot() +
+  aes(x = count, y = percentage) +
+  geom_point(alpha = 0.3, size = 1) +
+  facet_wrap(. ~ str_c("parent:\n", parent_cell_type) + cell_type_label, scales = "free_y", nrow = 2) +
+  scale_x_log10()
+
+
+```
+
+As "feared", we see more variability in the percentages where the counts are low (less than a hundred). 

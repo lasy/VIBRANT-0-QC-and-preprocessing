@@ -1,6 +1,6 @@
 ---
 title: "Assembling assays into a master `MultiAssayExperiment` object"
-author: Laura Symul
+author: Laura Symul, Laura Vermeren
 date: today
 format: 
    html:
@@ -21,6 +21,7 @@ editor: source
 
 ```{r}
 #| warning: false
+#| cache: false
 
 library(tidyverse)
 library(magrittr)
@@ -39,26 +40,25 @@ theme_set(theme_light())
 
 # Clinical data (CRF data)
 
-> TODO: fix the path to the VIBRANT dropbox once CRF data cleaning and QCed is finalized
-
-```{r}
-
-# crf_data_path <- fs::dir_ls(
-#   "/Users/laurasymul/OneDrive - UCL/Academia/Research/VIBRANT clinical data UCLouvain/Data processed/"
-# ) |> sort(decreasing = TRUE) |> str_subset("2025-05-26") 
-
-crf_data_path <- fs::dir_ls(
-  "/Users/lvermeren/OneDrive - UCL/VIBRANT clinical data/Data processed/") |> sort(decreasing = TRUE) |> magrittr::extract(1) #LV
-
-```
 
 ## CRF data (raw and QCed)
 
 ```{r}
 
-load(str_c(crf_data_path, "/crf_raw.RData"), verbose = TRUE)
-load(str_c(crf_data_path, "/crf_clean.RData"), verbose = TRUE)
-load(str_c(crf_data_path, "/crf_plates_dictionary.RData"), verbose = TRUE)
+crf_files <- 
+  get_01_output_dir() |> 
+  fs::dir_ls() |> 
+  str_subset("/01_")
+
+crf_clean_file <- crf_files |> str_subset("01_crf_clean") |> sort(decreasing = TRUE) |> magrittr::extract(1)
+crf_raw_file <- crf_files |> str_subset("01_crf_raw") |> sort(decreasing = TRUE) |> magrittr::extract(1)
+crf_dict_file <- crf_files |> str_subset("01_crf_plates_dictionary") |> sort(decreasing = TRUE) |> magrittr::extract(1)
+
+load(crf_clean_file, verbose = TRUE)
+load(crf_raw_file, verbose = TRUE)
+load(crf_dict_file, verbose = TRUE)
+
+rm(crf_clean_file, crf_raw_file, crf_dict_file)
 
 ```
 
@@ -67,9 +67,18 @@ load(str_c(crf_data_path, "/crf_plates_dictionary.RData"), verbose = TRUE)
 
 ```{r}
 
-load(str_c(crf_data_path, "/participants.RData"), verbose = TRUE)
-load(str_c(crf_data_path, "/participants_variable_dictionary.RData"), verbose = TRUE)
-load(str_c(crf_data_path, "/participant_crfs_merged.RData"), verbose = TRUE)
+load(
+  crf_files |> str_subset("01_participants_2025") |> sort(decreasing = TRUE) |> magrittr::extract(1),
+  verbose = TRUE
+  )
+load(
+  crf_files |> str_subset("01_participants_variable_dictionary") |> sort(decreasing = TRUE) |> magrittr::extract(1),
+  verbose = TRUE
+  )
+load(
+  crf_files |> str_subset("01_participant_crfs_merged") |> sort(decreasing = TRUE) |> magrittr::extract(1),
+  verbose = TRUE
+  )
 
 ```
 
@@ -77,8 +86,14 @@ load(str_c(crf_data_path, "/participant_crfs_merged.RData"), verbose = TRUE)
 
 ```{r}
 
-load(str_c(crf_data_path, "/visits.RData"), verbose = TRUE)
-load(str_c(crf_data_path, "/visits_crfs_merged.RData"), verbose = TRUE)
+load(
+  crf_files |> str_subset("01_visits_2025") |> sort(decreasing = TRUE) |> magrittr::extract(1),
+  verbose = TRUE
+  )
+load(
+  crf_files |> str_subset("01_visits_crfs_merged") |> sort(decreasing = TRUE) |> magrittr::extract(1),
+  verbose = TRUE
+  )
 
 ```
 
@@ -89,7 +104,7 @@ load(str_c(crf_data_path, "/visits_crfs_merged.RData"), verbose = TRUE)
 
 visits |> 
   ggplot() +
-  aes(x = study_day, y = pid |> factor(), color = dfseq |> factor()) +
+  aes(x = study_day, y = pid |> factor(), color = visit_code |> factor()) +
   geom_point() 
 
 ```
@@ -114,12 +129,10 @@ visits <-
 
 # Assays: loading the `SummarizedExperiment` objects 
 
-> TODO: a function that checks the "conformity" of the `SE` objects (e.g. `uid`, `colnames`, `sample_type`, `control_type`, `crf_match`) 
 
 ```{r}
 
-data_source <- "real"
-data_dir <- str_c(get_data_dir(data_source), "01 Preprocessed and QCed/")
+data_dir <- get_01_output_dir()
 se_files <- fs::dir_ls(data_dir, regexp = "se_.*\\.rds$") |> sort(decreasing = TRUE)
 
 ```
@@ -130,6 +143,7 @@ se_files <- fs::dir_ls(data_dir, regexp = "se_.*\\.rds$") |> sort(decreasing = T
 
 mg_file <- se_files[grepl("mg", se_files)][1]
 se_mg <- readRDS(mg_file)
+se_mg <- check_se(se_mg)
 se_mg
 
 ```
@@ -140,6 +154,7 @@ se_mg
 
 qPCR_file <- se_files[grepl("pcr_agg", se_files)][1]
 se_qPRC <- readRDS(qPCR_file)
+se_qPRC <- check_se(se_qPRC)
 se_qPRC
 
 ```
@@ -150,6 +165,7 @@ se_qPRC
 
 amplicon_file <- se_files[grepl("16S_agg", se_files)][1]
 se_16S <- readRDS(amplicon_file)
+se_16S <- check_se(se_16S)
 se_16S
 
 ```
@@ -162,7 +178,21 @@ se_16S
 
 luminex_file <- se_files[grepl("luminex_agg", se_files)][1]
 se_luminex <- readRDS(luminex_file)
+se_luminex <- check_se(se_luminex)
 se_luminex
+
+```
+
+
+## Flow cytometry data
+
+
+```{r}
+
+flow_file <- se_files[grepl("flow", se_files)][1]
+se_flow <- readRDS(flow_file)
+se_flow <- check_se(se_flow)
+se_flow
 
 ```
 
@@ -193,6 +223,11 @@ assay_list <-
       mae_assay_name = "luminex", 
       se_object_name = "se_luminex", 
       assay_label = "Luminex"
+      ),
+    tibble(
+      mae_assay_name = "flow", 
+      se_object_name = "se_flow", 
+      assay_label = "Flow cytometry"
       )
   ) |> 
   mutate(
@@ -206,8 +241,6 @@ We will assemble the following tables (`SE` objects):
 ```{r}
 assay_list |> gt()
 ```
-
-> TODO: add the Flow Cytometry data once available
 
 
 ## `mae_coldata_assays` tables
@@ -452,12 +485,13 @@ SE_list <-
     mg = se_mg,
     qPCR = se_qPRC,
     amplicon = se_16S,
-    luminex = se_luminex
+    luminex = se_luminex,
+    flow = se_flow
   )
 
 
 mae <- 
-  MultiAssayExperiment(
+  MultiAssayExperiment::MultiAssayExperiment(
     experiments = MultiAssayExperiment::ExperimentList(SE_list),
     colData = 
       mae_coldata |> select(-in_CRF, -in_assays) |> 
@@ -492,7 +526,7 @@ mae
 ```{r}
 
 mae_sample_map <- 
-  mae@sampleMap |> as_tibble() |> filter(assay %in% assay_list$mae_assay_name) |>
+  mae@sampleMap |> as_tibble() |> dplyr::filter(assay %in% assay_list$mae_assay_name) |>
   select(uid = primary, assay) |> 
   arrange(uid) |> 
   dplyr::left_join(assay_list |> dplyr::rename(assay = mae_assay_name), by = join_by(assay)) |> 
@@ -511,7 +545,7 @@ All samples
 #| fig-width: 12
 
 mae_sample_map |> 
-  filter(!is.na(assay)) |> 
+  dplyr::filter(!is.na(assay)) |> 
   group_by(uid) |> mutate(n = n()) |> ungroup() |> 
   mutate(uid = uid |> fct_reorder(-n)) |>
   ggplot() +
@@ -538,12 +572,15 @@ Longitudinal availability for all visits
 #| fig-width: 12
 
 mae_sample_map |> 
-  filter(!is.na(assay)) |> 
+  dplyr::filter(!is.na(assay)) |> 
   # filter(visit_code %in% c("0000", seq(1000, 1900, by = 100), "2120")) |> 
   ggplot() +
   aes(x = assay_label, y = pid, fill = assay_label) +
   geom_tile() +
-  facet_grid(ifelse(randomized, "Randomized", "Not randomized") + location ~ visit_code, scales = "free_y", space = "free_y") + # sample_category
+  facet_grid(
+    ifelse(randomized, "Randomized", "Not randomized") + location ~ visit_code, 
+    scales = "free_y", space = "free_y"
+    ) + # sample_category
   scale_y_discrete("Participants IDs") + #, breaks = "NULL")  +
   xlab("") +
   scale_fill_brewer("Assay", type = "qual", palette = 7) + # 3
@@ -562,8 +599,8 @@ For the weekly visits
 #| fig-width: 12
 
 mae_sample_map |> 
-  filter(!is.na(assay)) |> 
-  filter(visit_type == "Clinic") |> 
+  dplyr::filter(!is.na(assay)) |> 
+  dplyr::filter(visit_type == "Clinic") |> 
   ggplot() +
   aes(x = assay_label, y = pid, fill = assay_label) +
   geom_tile() +
@@ -586,6 +623,23 @@ mae_sample_map |>
 > There is one US participant with the termination `visit_code` for their 16S data, but it should be changed to `1700`.
 
 
+# Fixing visit codes and visit days
+
+> TODO
+
+In this section we perform a few fixes for mismatched `visit_code`s, `study_day`s, and when needed, associated `uid`s.
+
+
+
+```{r}
+
+
+
+```
+
+
+
+
 # Subsetting and saving the `MultiAssayExperiment` objects
 
 We save the "master" MAE (with all assays); but if needed for publication, we can subset the MAE to only include the assays/data of interest.
@@ -595,8 +649,7 @@ We save the "master" MAE (with all assays); but if needed for publication, we ca
 saveRDS(
   mae, 
   str_c(
-    get_data_dir(data_source = data_source),  
-    "02 MAEs/",
+    get_02_output_dir(),
     "mae_full_", today() |> str_remove_all("-"), ".rds"
   )
 )
