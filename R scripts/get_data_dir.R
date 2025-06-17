@@ -1,4 +1,8 @@
 
+# SOURCE DATA
+
+## Clinical data
+
 get_clinical_data_dir <- function(){
   
   if (str_detect(getwd(), "laurasymul"))
@@ -18,12 +22,20 @@ get_clinical_data_dir <- function(){
   data_dir
 }
 
+## Assay data
+
+get_data_dir <- function() {
+  get_VIBRANT_Dropbox_dir() |> str_c("90_VIBRANT_consolidated_data/")
+}
+
+# OUTPUT DATA
+
 get_uclouvain_data_dir <- function(){
   
   if (str_detect(getwd(), "laurasymul"))
     data_dir <- "/Users/laurasymul/OneDrive - UCL/Academia/Research/VIBRANT data UCLouvain/"
   else if (str_detect(getwd(), "vermeren"))
-    data_dir <- "/Users/lvermeren/OneDrive - UCL/VIBRANT data UCLouvain/"
+    data_dir <- "C:/Users/lvermeren/OneDrive - UCL/VIBRANT data UCLouvain/"
   else
     stop("You need to specify the path to the data directory in `R/get_data_dir.R`")
   
@@ -31,9 +43,6 @@ get_uclouvain_data_dir <- function(){
   data_dir
 }
 
-get_data_dir <- function() {
-  get_VIBRANT_Dropbox_dir() |> str_c("90_VIBRANT_consolidated_data/")
-}
 
 get_output_dir <- function(){
   get_uclouvain_data_dir()
