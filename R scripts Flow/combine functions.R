@@ -225,7 +225,7 @@ create_SE_from_harmonized_flow_data <- function(flow_data){
   
   se_coldata <- 
     flow_data |> 
-    select(uid, sample) |> 
+    select(uid, sample, machine) |> 
     distinct() |> 
     group_by(uid) |> 
     slice_head(n = 1) |> 
@@ -297,6 +297,7 @@ create_SE_from_harmonized_flow_data <- function(flow_data){
     as.matrix()
   percentage_assay <- percentage_assay[features, se_coldata$uid]
   
+
   # Create the SummarizedExperiment object
   se <- SummarizedExperiment(
     assays = SimpleList(count = count_assay, percentage = percentage_assay),

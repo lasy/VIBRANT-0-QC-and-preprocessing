@@ -178,11 +178,11 @@ if (!dir.exists(out_dir)) {
 }
 ```
 
-For MGH samples, we need to load the list of samples along with the machine that was used for each sample. This is provided in the `MGH_sample_list_with_machine.csv` file, which contains the expected visit codes and sample IDs.
+For MGH samples, we need to load the list of samples along with the machine that was used for each sample. This is provided in the `MGH_sample_list_with_machine_no_dates.csv` file, which contains the expected visit codes and sample IDs.
 
 ```{r}
 
-mgh_samples <- read_csv(file = str_c(get_data_dir(), "00 Raw/06 Flow cytometry/MGH_sample_list_with_machine.csv"))
+mgh_samples <- read_csv(file = str_c(get_data_dir(), "06 Flow cytometry/MGH_sample_list_with_machine_no_dates.csv"))
 mgh_samples |> head()
 
 ```
@@ -666,7 +666,7 @@ Since the gating structure was different at both sites and something within site
 
 gate_mapping <- 
   read.csv(
-    str_c(get_data_dir(), "00 Raw/06 Flow cytometry/gate_mapping_completed.csv")
+    str_c(get_data_dir(), "06 Flow cytometry/gate_mapping_completed.csv")
   )
 
 gate_mapping <- 
@@ -697,10 +697,61 @@ results <-
 
 flow_data <- results$all_data
 
+
 # results <- load(str_c(out_dir, "combined_flow_results.RData"), verbose = TRUE)
 # flow_data <- all_data
 
+
 ```
+
+For the MGH data, we add the machine
+
+```{r}
+
+get_visit_code <- function(visits){
+  visit_code <- c(
+    "V1" = "1000",
+    "V2" = "1100",
+    "V3" = "1200",
+    "V6" = "1500",
+    "V7" = "1700",
+    "V9" = "2120"
+  ) 
+  visit_codes <- 
+    visit_code |> 
+    as.data.frame() |> 
+    rownames_to_column("visit") |>
+    as_tibble()
+  
+  rm(visit_code)
+  
+  tibble(
+    visit = visits |> str_remove_all("\\s+")
+  ) |> 
+    left_join(
+      visit_codes, by = "visit"
+    ) |> 
+    pull(visit_code)
+}
+
+flow_data <- 
+  flow_data |> 
+  dplyr::left_join(
+    mgh_samples |> 
+      mutate(
+        pid = Subject |> str_remove_all("-") |> str_replace("^068", "68"),
+        visit_code =  get_visit_code(Visit),
+        machine = Machine
+      ) |> 
+      select(pid, visit_code, machine),
+    by = join_by(pid, visit_code)
+  )
+
+```
+
+
+
+
 
 # `SummarizedExperiment` object
 
@@ -717,6 +768,7 @@ The `features` of the `SE` object will be the harmonized `cell_type`, and the co
 The `samples` will be the VIBRANT `uid` (concatenation of `pid` and `visit_code`), and the corresponding `colData` will contain the 
 
 - `sample` name (fcs file)
+- `machine` (for MGH samples, `NA` for CAP samples)
 
 
 The `SE` will contain 2 `assays`
@@ -1065,7 +1117,7 @@ se_flow |>
   mutate(uid = uid |> fct_reorder(live_perc)) |> 
   ggplot() +
   aes(x = uid, y = cell_type_label |> fct_rev(), fill = percentage) +
-  facet_grid(parent_cell_type ~ site, scales = "free", space = "free") +
+  facet_grid(parent_cell_type ~ site + machine, scales = "free", space = "free") +
   geom_tile() +
   scale_fill_gradient(low = "white", high = "dodgerblue1", na.value = "red") +
   theme(

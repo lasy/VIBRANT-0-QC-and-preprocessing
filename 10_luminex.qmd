@@ -204,7 +204,7 @@ purrr::walk(
 :::
 
 
-::: callout-note
+:::callout-note
 Some manual fixes have to be made on the sample names based on the plate layouts and we harmonized the names of the biological controls (e.g., `BIOL CTRL` and `BIO CTRL`).
 :::
 
@@ -713,7 +713,7 @@ colData(raw) |>
   guides(col = "none")
  
 ```
-::: callout-note
+:::callout-note
 The dilution factors have been rounded to the lowest integer on some plates. Since we will likely use different dilution factors (see below the discussion the sample volumes and weights), re-calculate the concentrations, this is not an issue for now.
 :::
 
@@ -856,7 +856,7 @@ wilcox.test(weight ~ location, data = dilution_related_data) |>
 ```
 Sample weights are significantly higher in the US compared to SA.
 
-::: callout-note
+:::callout-note
 In the manifest, US weights are rounded with 1 decimal in batch 1, but have up to 4 decimals in batch 2. 
 :::
 
@@ -866,7 +866,7 @@ We load the original US manifests received by Lenine to obtain the non-rounded w
 
 us_weight_data <- 
   read_xlsx(
-    str_c(luminex_dir, "/US manifests/VIBRANT_LUMINEX_US MANIFEST all boxes.xlsx"),
+    str_c(get_clinical_data_dir(), "/US softcup manifests/VIBRANT_LUMINEX_US MANIFEST all boxes.xlsx"),
     range = "A1:N210"
   )
   
@@ -1071,7 +1071,7 @@ us_weight_data |>
 
 In the chunk below, we replace the weights and volumes in the `SE` object with the values from the US manifest.
 
-::: callout-note
+:::callout-note
 We assume that the SA team added 0.5 mL of saline to all samples. Might be worth checking with the team.
 ::: 
 
@@ -1143,7 +1143,7 @@ raw |>
 ```
 This matches quite well the identity line (assumption of the ECHO study).
 
-::: callout-note
+:::callout-note
 Since we do not have the original volumes for all samples, we assume 1g = 1mL for **all** samples to compute the final dilution factors (ECHO protocol).
 :::
 
@@ -1690,7 +1690,7 @@ raw |>
 rm(blanks)
 
 ```
-::: callout-note
+:::callout-note
 The figure above shows that the fluorescence intensity of S9 and S10 are overlapping with the fluorescence intensity of the blanks wells. This is why we did not include S9 and S10 in batch 2 to save space on the plates.
 :::
 
