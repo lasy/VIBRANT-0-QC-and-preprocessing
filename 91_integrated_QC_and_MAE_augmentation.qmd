@@ -451,9 +451,12 @@ colonization_crispatus_mg <-
   mae[["mg"]] |> 
   as_tibble() |>
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
   filter(sample_type == "Clinical sample") |> 
   filter(species == "crispatus") |> 
 =======
+=======
+>>>>>>> Stashed changes
   dplyr::filter(sample_type == "Clinical sample", !poor_quality_mg_data) |> 
   dplyr::filter(species == "crispatus") |> 
 >>>>>>> Stashed changes

@@ -947,6 +947,7 @@ visits_crf_name <- setdiff(visits_crf_name, no_dfseq)
 
 ```
 
+Some variables have the same name in different crf. For example `vaginal_bleeding` is present in CRF19 and CRF33. We will rename these variables by adding the name of the CRF to the end of the variable.
 
 ```{r}
 
@@ -955,21 +956,30 @@ visits_crf_name <- setdiff(visits_crf_name, no_dfseq)
 #   crf_clean[setdiff(visits_crf_name, no_studyday)] |> 
 #   purrr::reduce(full_join, by = join_by(uid, pid, visit_code, dfseq, study_day))
 
+crf_list_renamed <- 
+  crf_clean |>
+  imap(function(df, name) {
+    double_cols <- c("vaginal_discharge", "vaginal_bleeding", "put_in_vagina_type", "sex_past_24hours", "page")
+    names(df)[names(df) %in% double_cols] <- paste0(names(df)[names(df) %in% double_cols], ".", name)
+    df
+  })
+
 visits_crfs_merged <-
-  crf_clean[setdiff(visits_crf_name, no_studyday)] |> 
+  crf_list_renamed[setdiff(visits_crf_name, no_studyday)] |> 
   map(
     function(df) {
       df |> select(-any_of(c("uid", "vdate_fixed")))
     }
   ) |>
   purrr::reduce(full_join, by = join_by(pid, visit_code, dfseq, study_day))
+
   
 # Then add crf with no study_day
 
 visits_crfs_merged <- 
   visits_crfs_merged |> 
   full_join(
-    crf_clean[setdiff(no_studyday, no_dfseq)] |> 
+    crf_list_renamed[setdiff(no_studyday, no_dfseq)] |> 
       map(
         function(df) {
           df |> select(-any_of(c("uid")))
@@ -979,11 +989,16 @@ visits_crfs_merged <-
     by = join_by(pid, visit_code, dfseq)
   )
 
+<<<<<<< Updated upstream
 
 
 visits_crfs_merged |> 
   select(any_of(colnames(visits_crfs_merged)[str_detect(colnames(visits_crfs_merged), "\\.x")]))
 
+=======
+# visits_crfs_merged |> 
+#   select(any_of(colnames(visits_crfs_merged)[str_detect(colnames(visits_crfs_merged), "\\.x")]))
+>>>>>>> Stashed changes
 ```
 
 
