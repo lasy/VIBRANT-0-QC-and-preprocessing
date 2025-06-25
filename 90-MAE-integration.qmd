@@ -131,6 +131,17 @@ visits <-
 ```
 
 
+## `Exposures` table
+
+```{r}
+
+load(
+  crf_files |> str_subset("01_exposures_") |> sort(decreasing = TRUE) |> magrittr::extract(1),
+  verbose = TRUE
+  )
+
+```
+
 
 
 # Assays: loading the `SummarizedExperiment` objects 
@@ -943,7 +954,8 @@ mae <-
       crf_data_raw = crf_raw,
       crf_data_clean = crf_clean, 
       participant_crfs_merged = participant_crfs_merged,
-      visits_crfs_merged = visits_crfs_merged
+      visits_crfs_merged = visits_crfs_merged,
+      exposures = exposures
     )
   )
 
@@ -1087,8 +1099,8 @@ mae_sample_map |>
 
 
 ```{r}
-#| fig-height: 12
-#| fig-width: 12
+#| fig-height: 8
+#| fig-width: 8
 
 mae_sample_map |> 
   dplyr::filter(randomized) |> 
@@ -1098,7 +1110,7 @@ mae_sample_map |>
   aes(x = assay_label, y = pid, fill = assay_label) +
   geom_tile() +
   facet_grid(
-    location + ifelse(randomized, "Randomized", "Not randomized")  + arm  ~ visit, 
+    location + arm  ~ visit, 
     scales = "free_y", space = "free_y"
     ) + # sample_category
   scale_y_discrete("Participants IDs") + #, breaks = "NULL")  +

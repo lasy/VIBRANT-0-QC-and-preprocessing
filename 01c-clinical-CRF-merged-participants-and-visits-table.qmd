@@ -956,9 +956,16 @@ visits_crf_name <- setdiff(visits_crf_name, no_dfseq)
 # visits_crfs_merged <- 
 #   crf_clean[setdiff(visits_crf_name, no_studyday)] |> 
 #   purrr::reduce(full_join, by = join_by(uid, pid, visit_code, dfseq, study_day))
+crf_list_renamed <-
+  crf_clean |>
+  imap(function(df, name) {
+    double_cols <- c("vaginal_discharge", "vaginal_bleeding", "put_in_vagina_type", "sex_past_24hours", "page")
+    names(df)[names(df) %in% double_cols] <- paste0(names(df)[names(df) %in% double_cols], ".", name)
+    df
+  })
 
 visits_crfs_merged <-
-  crf_clean[setdiff(visits_crf_name, no_studyday)] |> 
+  crf_list_renamed[setdiff(visits_crf_name, no_studyday)] |> 
   map(
     function(df) {
       df |> select(-any_of(c("uid", "vdate_fixed")))
@@ -971,7 +978,7 @@ visits_crfs_merged <-
 visits_crfs_merged <- 
   visits_crfs_merged |> 
   full_join(
-    crf_clean[setdiff(no_studyday, no_dfseq)] |> 
+    crf_list_renamed[setdiff(no_studyday, no_dfseq)] |> 
       map(
         function(df) {
           df |> select(-any_of(c("uid")))

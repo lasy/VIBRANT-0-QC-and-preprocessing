@@ -3425,7 +3425,8 @@ exposures <-
   exposures |>
   mutate(
     metronidazole =  case_when(
-      pid %in% pid_temp & dfseq >= 1001 & dfseq <= 1007 ~ "2", 
+      pid %in% pid_temp & dfseq >= 1001 & dfseq <= 1007 ~ "2",
+
       TRUE ~ NA_character_)
     )
 
@@ -3457,7 +3458,6 @@ exposures <-
     metronidazole = 
     case_when(
       pid %in% pid_ok & dfseq %in% c(1001:1007) ~ "2",
-      
       pid == "068100006" & dfseq == 1002 ~"1", 
       pid == "068100006" & dfseq %in% c(1001,1003:1007) ~"2",
       pid == "068100011" & dfseq %in% c(1001) ~ "1", # start at night
@@ -3529,7 +3529,8 @@ exposures <-
       pid == "068200460" & dfseq == 1006 ~"0",
       pid == "068200465" & dfseq %in% c(1002:1004) ~"2",
       pid == "068200465" & dfseq %in% c(1001, 1005) ~"1",
-      pid == "068200465" & dfseq %in% c(1006:1007) ~ "2"
+      pid == "068200465" & dfseq %in% c(1006:1007) ~ "2",
+      TRUE ~ as.character(metronidazole)
       )
   )
 
@@ -3604,7 +3605,8 @@ exposures <-
   ) |> 
   mutate(study_product = case_when(
     pid %in% pid_temp & dfseq %in% c(1101:1107) ~ "1",
-    pid %in% pid_temp & !(dfseq %in% c(1001:1007)) ~ "0",
+    pid %in% pid_temp & !(dfseq %in% c(1101:1107)) ~ "0",
+
     pid == "068100013" & dfseq %in% c(1101:1107) ~ "1", 
     pid == "068100006" & dfseq %in% c(1301, 1401:1407) ~ "0",
     pid == "068100053" & dfseq %in% c(1101:1102, 1104:1107) ~ "0",
@@ -3633,11 +3635,15 @@ exposures <-
 exposures |>
   ggplot(aes(y = factor(dfseq), x = factor(pid), color = metronidazole)) +
   geom_point() +
-  scale_color_discrete(na.translate = FALSE) +  
+  # scale_color_discrete(na.translate = FALSE) +  
+  scale_color_manual(
+    "Nb of metronidazole doses", 
+    values = c("0" = "red", "1" = "orange", "2" = "steelblue2","no info" = "lightblue4"),
+    na.translate = FALSE
+    ) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1), 
         plot.title = element_text(hjust = 0.5)) + 
   labs(title = "Exposures metronidazole", y = "Pid", x = "dfseq")
-  
 
 ```
 
@@ -3649,6 +3655,11 @@ exposures |>
   ggplot(aes(y = factor(dfseq), x = factor(pid), color = study_product)) +
   geom_point() +
   scale_color_discrete(na.translate = FALSE) +  
+  scale_color_manual(
+    "Nb of study product doses", 
+    values = c("0" = "transparent", "1" = "steelblue2","no info" = "lightblue4"),
+    na.translate = FALSE
+  ) +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1), 
         plot.title = element_text(hjust = 0.5)) + 
   labs(title = "Exposures study product", y = "Pid", x = "dfseq")

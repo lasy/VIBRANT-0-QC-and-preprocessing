@@ -1,5 +1,5 @@
 ---
-title: "QC across assays & MAE augmentation"
+title: "MAE augmentation (primary and secondary outcome definitions)"
 author: Laura Symul, Laura Vermeren
 date: today
 format: 
@@ -227,7 +227,7 @@ colonization_crispatus_mg <-
   mae[["mg"]] |> 
   as_tibble() |>
   left_join(mae@colData |> as_tibble()) |>
-  dplyr::filter(sample_type == "Clinical sample") |> 
+  dplyr::filter(sample_type == "Clinical sample", !poor_quality_mg_data) |> 
   dplyr::filter(species == "crispatus") |> 
   group_by(.sample) |> 
   summarize(
