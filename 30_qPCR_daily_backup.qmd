@@ -61,54 +61,31 @@ qpcr |> glimpse()
 
 ```
 
+
+
+
+We also note that there is two sample on the same plate that has 6 replicates instead of 3 in the 16S qPCR (16S target).
+
 ```{r}
-#| eval: false
 
-qpcr$Data_row |> unique() |> length()
-nrow(qpcr)
+qpcr |> 
+  dplyr::filter(Target == "16S") |>
+  dplyr::filter(!is.na(VIBR_Sample_ID)) |>
+  dplyr::count(VIBR_Sample_ID, gDNA_Plate_ID ) |> 
+  dplyr::filter(n > 3)
 
-qpcr$Well |> table()
-qpcr$Well |> range()
+# actually 6 replicates instead of 3 for all targets
+# qpcr |> 
+#   dplyr::filter(!is.na(VIBR_Sample_ID)) |>
+#   dplyr::count(VIBR_Sample_ID, gDNA_Plate_ID, Target) |> 
+#   dplyr::filter(n > 3)
 
-qpcr$Fluor |> table()
-
-qpcr$Content |> table()
-
-qpcr$Replicate |> table()
-
-qpcr |> dplyr::count(Content, Replicate)
-
-qpcr |> dplyr::count(Replicate, plate_id, VMRC_Group, Target)
-
-
-qpcr$Sample |> table(useNA = "ifany")
-
-qpcr |> dplyr::count(Well, Sample)
-
-qpcr |> dplyr::count(Content, Sample)
-
-qpcr$plate_id |> table()
-qpcr$Plate_number |> table()
-qpcr |> dplyr::count(plate_id, Plate_number)
-
-qpcr$gDNA_Plate_ID |> table()
-
-qpcr |> dplyr::count(plate_id, Plate_number, gDNA_Plate_ID)
-# TODO: document this in the report (que chaque gDNA plate sent by Synaye was put on a single qPCR plate)
-
-
-qpcr$VMRC_Group |> table(useNA = "ifany")
-
-qpcr |> dplyr::count(plate_id, VMRC_Group)
-# Maybe document that all samples from the same gDNA box were put on the same qPCR plate BUT that the plate_id are not unique because they had to split the gDNA box samples to 6 plates: 5 for the LBPs and 1 for the total 16S.
-
-qpcr$InRedos |> table(useNA = "ifany") # All NA -> remove
-
-qpcr$Dilution_Factor |> unique()
+qpcr |> 
+  dplyr::filter(Target == "16S") |> 
+  dplyr::filter(VIBR_Sample_ID %in% c("2286665", "2292179")) |> 
+  select(VIBR_Sample_ID, Data_row, Well, Sample, Cq, Copies_per_swab, gDNA_Plate_ID, gDNA_Plate_Well)
 
 ```
-
-
 
 
 ```{r}
@@ -118,20 +95,20 @@ dictionary <-
   mutate(
     description = 
       case_when(
-        (original_name == "Data_row") ~ 'Table row number (1 number per row)',
+        (original_name == "Data_row") ~ 'Table row number',
         (original_name == "Well") ~ str_c("qPCR plate well ID. From ", min(qpcr$Well), " to ", max(qpcr$Well)),
         (original_name == "Fluor") ~ str_c('fluorescent dye used (one of ', qpcr$Fluor |> unique() |> str_c(collapse = ", "), ")"),
-        (original_name == "Content") ~ 'Indicates whether well is empty, contains a clinical sample, a standard, or a negative control.',
+        (original_name == "Content") ~ 'Indicates whether well contains a sample, a standard, or a negative control.',
         (original_name == "Replicate") ~ 
           str_c(
-            "A number identifying replicates of the same sample, ranging from ", min(qpcr$Replicate, na.rm = TRUE), " to ", max(qpcr$Replicate, na.rm = TRUE), 
-            " (with ", sum(is.na(qpcr$Replicate)), " missing values). Values are repeated 495, or 990 times, but typically 3 (or 6) time per plate (it can be 6 because standards are numbered from 1 to 7, and samples are also numbered from 1 to N)."
+            "The replicate number from ", min(qpcr$Replicate, na.rm = TRUE), " to ", max(qpcr$Replicate, na.rm = TRUE), 
+            " (with ", sum(is.na(qpcr$Replicate)), " missing values). Values are repeated 495, or 990 times."
           ),
         (original_name == "Sample") ~ 'A qPCR plate-specific sample ID. This column wont be used or kept for downstream analyses.',
         (original_name == "Cq") ~ 'Quantification cycle (Cq) value.',
         (original_name == "Starting Quantity (SQ)") ~ 'Starting quantity (SQ) value; computed from the Cq values using the inverse calibration function (calibration curve fitted using the expected SQ values for the standards).',
         (original_name == "Cq Mean") ~ 'Mean across replicates',
-        (original_name == "plate_id") ~ str_c('qPCR plate name - several qPCR plates have the same name because they have been named according to the gDNA boxes and qPCR plates for the same sample but different targets have the same `plate_id`; there are ', qpcr$plate_id |> unique() |> length()," unique plate IDs in total."),
+        (original_name == "plate_id") ~ str_c('qPCR plate ID; there are ', qpcr$plate_id |> unique() |> length()," unique plate IDs in total."),
         (original_name == "Plate_number") ~ str_c("The extraction plate number; there are ", qpcr$Plate_number |> unique() |> length()," unique plate numbers in total (5 identical `plate_id` per `Plate_number`)."),
         (original_name == "gDNA_Plate_ID") ~ 'The extraction plate ID',
         (original_name == "VMRC_Group") ~ str_c('The group of the LBP strains. There are ', qpcr$VMRC_Group |> unique() |> na.omit() |> length()," unique VMRC groups in total (", qpcr$VMRC_Group |> unique() |> na.omit() |> sort() |> str_c(collapse = ", "), ")"),
@@ -143,7 +120,7 @@ dictionary <-
         (original_name == "Dilution_Factor") ~ str_c('The qPCR plate specific dilution factor. There are ', qpcr$Dilution_Factor |> unique() |> length()," unique dilution factors in total (", qpcr$Dilution_Factor |> unique()  |> sort() |> str_c(collapse = ", "),")"),
         (original_name == "Quant_Adjusted") ~ str_c("Quantification value adjusted by the dilution factor; range from ", min(qpcr$Quant_Adjusted, na.rm = TRUE)," to ", max(qpcr$Quant_Adjusted, na.rm = TRUE)),
         (original_name == "Copies_per_swab") ~ str_c("The number of target copies per swab, computed from the adjusted quantification values. Ranges from ", min(qpcr$Copies_per_swab, na.rm = TRUE)," to ", max(qpcr$Copies_per_swab, na.rm = TRUE)),
-         (original_name == "InRedos") ~ str_c("Whether the sample was part of the samples that were redone (= re-extracted) - in this data, no samples were re-extracted, so this column has `NA` for all rows."),
+         (original_name == "InRedos") ~ str_c("Whether the sample was part of the samples that were redone (= re-extracted)."),
         TRUE ~ "????"
       )
   )
@@ -153,7 +130,6 @@ dictionary <-
 ```{r}
 # dictionary |> gt()
 ```
-
 
 
 
@@ -200,51 +176,14 @@ dictionary |>
 
 ```{r}
 
-qpcr <- qpcr |> select(-any_of("in_redos"))
-
-```
-
-
-```{r}
-
-# TODO : fix the ext_lib_position: replace h9 by H9 (carefully?!)
-
-```
-
-
-
-
-### Number of replicates per VIBRANT sample on the gDNA plates
-
-There are several samples that have replicates on different extraction plates (`ext_lib_plate_nb` or `ext_lib_plate_id`). 
-
-
-
-```{r}
-
-tmp <- 
+qpcr <- 
   qpcr |> 
-  dplyr::filter(!is.na(vibr_sample_id)) |> 
-  select(vibr_sample_id, ext_lib_plate_nb, ext_lib_plate_id, ext_lib_position) |> 
-  distinct() |> 
-  group_by(vibr_sample_id, ext_lib_plate_nb, ext_lib_plate_id) |> 
-  mutate(n_replicates_on_ext_plates = n()) |> 
-  ungroup()
+  mutate(
+    in_redos = (in_redos == 1) |> replace_na(FALSE) # Convert to logical
+  )
 
-tmp |> 
-  filter(n_replicates_on_ext_plates > 1) |> 
-  arrange(-n_replicates_on_ext_plates, ext_lib_plate_nb) |> 
-  gt("Sample IDs replicated in the extraction plates")
-
+# TODO: no samples in redo: document that there are none, then remove the column
 ```
-
-
-
-This is unexpected because we thought that each sample was only extracted once. 
-
-:::callout-note
-Check with Michael and/or Sinaye about these samples, and check in the 16S amplicon sequencing manifest if we also find these replicates 
-:::
 
 
 
@@ -506,7 +445,14 @@ qpcr |>
 
 ### Manifest data
 
-We merge the qPCR data with the 16S manifest data to add the participant ID (`pid`) and (`visit_code`).
+:::callout-note
+Where can I found the technical metadata ? 
+For now, I use technical data from metagenomics manifest
+
+Are also the 6 replicates a problem ? 
+:::
+
+We merge the qPCR data with the metagenomics manifest data to add the participant ID (`pid`) and (`visit_code`).
 
 
 ? 
