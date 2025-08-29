@@ -204,26 +204,37 @@ qpcr <- qpcr |> select(-any_of("in_redos"))
 
 ```
 
-We noticed a typo in `ext_lib_position`., some sample are labbeled "_h9" and some "_H9". We fix this issue. 
+We noticed a typo in `ext_lib_position`: all samples are labelled as the concatenation of the `ext_lib_plate_id` and their well coordinates where the well row is a big letter, but a few sample were labelled "`_h9`" instead of "`_H9`". We fix this here.
 
 ```{r}
-
-# TODO : fix the ext_lib_position: replace h9 by H9 (carefully?!)
 
 qpcr <- 
   qpcr |> 
   mutate(ext_lib_position = str_replace(ext_lib_position, "_h9$", "_H9"))
+
+# qpcr$ext_lib_position |> str_remove("[0-9]*_") |> str_remove("MGH8_") |> table()
+
+```
+
+
+```{r}
+
+qpcr <- 
+  qpcr |> 
+  arrange(strain_group_qpcr, target) |> 
+  mutate(
+    target = target |> fct_inorder()
+  )
 
 ```
 
 
 
 
+
 ### Number of replicates per VIBRANT sample on the gDNA plates
 
-There are two samples that have replicates on different extraction plates (`ext_lib_plate_nb` or `ext_lib_plate_id`). 
-
-
+We first check for any replicates on the extraction plates (i.e., `vibr_sample_id` that are found twice in `ext_lib_plate_nb` or `ext_lib_plate_id`). 
 
 ```{r}
 
@@ -236,16 +247,32 @@ tmp <-
   mutate(n_replicates_on_ext_plates = n()) |> 
   ungroup()
 
+```
+
+There are `r tmp$vibr_sample_id[tmp$n_replicates_on_ext_plates > 1] |> unique() |> length()` samples that have replicates on the extraction plates:
+
+```{r}
+
 tmp |> 
   filter(n_replicates_on_ext_plates > 1) |> 
   arrange(-n_replicates_on_ext_plates, ext_lib_plate_nb) |> 
-  gt("Sample IDs replicated in the extraction plates")
+  group_by(vibr_sample_id) |> 
+  gt(
+    caption = "Sample IDs replicated in the extraction plates", 
+    row_group_as_column = TRUE
+    )
 
 ```
 
-We change the `vibr_sample_id` of the 2 samples that have 6 replicates in the gDNA (extraction) by adding "_1" and "_2" depending on their gDNA position
+
+
+
+We change the `vibr_sample_id` of these samples with replicates in the gDNA (extraction) by adding "`_1`" and "`_2`" to their `vibr_sample_id`
+
 
 ```{r}
+
+
 qpcr <-
   qpcr |>
   left_join(
@@ -264,8 +291,14 @@ qpcr <-
   mutate(vibr_sample_id = coalesce(vibr_sample_id_new, vibr_sample_id)) |>
   select(-vibr_sample_id_new)
 
+```
 
-qpcr_bis |> 
+We check for unicity of `vibr_sample_id`s in the extraction plates again:
+
+```{r}
+
+tmp <- 
+  qpcr |> 
   dplyr::filter(!is.na(vibr_sample_id)) |> 
   select(vibr_sample_id, ext_lib_plate_nb, ext_lib_plate_id, ext_lib_position) |> 
   distinct() |> 
@@ -273,25 +306,166 @@ qpcr_bis |>
   mutate(n_replicates_on_ext_plates = n()) |> 
   ungroup() |> 
   filter(n_replicates_on_ext_plates > 1) |> 
-  arrange(-n_replicates_on_ext_plates, ext_lib_plate_nb) |> 
-  gt("Sample IDs replicated in the extraction plates")
+  arrange(-n_replicates_on_ext_plates, ext_lib_plate_nb) 
+
+nrow(tmp) == 0
+
+if (nrow(tmp) > 0){
+  tmp |> 
+  gt(caption = "Remaining sample IDs replicated in the extraction plates")
+}
+
+```
+
+This appears to have fixed the issue.
+
+
+:::callout-note
+Check with Michael and/or Sinaye about these two samples, and check in the 16S amplicon sequencing manifest if we also find these replicates 
+:::
+
+
+>>> TODO: document the samples that had a position on the gDNA plates BUT did NOT have a `vibr_sample_id` (i.e., `NA` in the `vibr_sample_id` column).
+>>> TODO: show the gDNA plate design with whether `vibr_sample_id` was missing.
+
+>>> TODO: check later with the manifest data
+
+
+>>> LIKELY EXPLANATION: LAZYNESS
+> Les colones "vibr_sample_id" didn't get filled for some of the plates -> we can likely fill in based on the plates for which we have the data....
+
+
+```{r}
+#| eval: false
+
+se_16S <- 
+  readRDS(
+    list.files(
+      path = str_c(get_output_dir(), "01 Preprocessed and QCed/"),
+      pattern = "04_se_16S_raw_.*\\.rds$", full.names = TRUE
+    ) |>
+      sort(decreasing = TRUE) |>
+      magrittr::extract(1)
+  ) 
+
+manifest <- 
+  se_16S |> 
+  colData() |>
+  as.data.frame() |> 
+  as_tibble() |> 
+  select(
+    sample_id, sample_id_2, sample_id_barcode, specimen_type, well_id, pool, 
+    original_mgh_aliquot_unique_identifier, ext_lib_plate_type, 
+    ext_lib_plate_nb, location,
+    pid, visit_code, sample_type, control_type, randomized, location) |> 
+  distinct()
+
+
+# |>
+#   mutate(uid = str_c(pid, visit_code, sep = "_")) |> 
+#   filter(!is.na(sample_id_barcode))
+
 ```
 
 
 
-This is unexpected because we thought that each sample was only extracted once. 
 
-:::callout-note
-Check with Michael and/or Sinaye about these samples, and check in the 16S amplicon sequencing manifest if we also find these replicates 
-:::
 
+### Number of replicates per VIBRANT sample on the PCR plates
+
+We now check how many replicates each `vibr_sample_id` has on the PCR plates (*i.e.*, replicates per `target`).
+
+```{r}
+
+tmp <- 
+ qpcr |> 
+  dplyr::filter(!is.na(vibr_sample_id)) |> 
+  select(vibr_sample_id, target, pcr_plate_id, well) |> 
+  distinct() |> 
+  group_by(vibr_sample_id, target) |> 
+  mutate(
+    n_replicates_per_target = n(),
+    n_plates = pcr_plate_id |> unique() |> length()
+    ) |> 
+  ungroup() 
+
+tmp |>
+  select(vibr_sample_id, n_replicates_per_target, n_plates) |> 
+  distinct() |> 
+  dplyr::count(n_replicates_per_target, n_plates, name = "n_samples") |> 
+  gt(
+    caption = "Number of qPCR replicates per VIBRANT sample and target"
+  )
+
+```
+
+Most samples have 3 replicates. But a few samples have 6 replicates located on 2 different plates:
+
+```{r}
+
+tmp <- 
+ qpcr |> 
+  dplyr::filter(!is.na(vibr_sample_id)) |> 
+  select(vibr_sample_id, target, pcr_plate_id, well) |> 
+  distinct() |> 
+  group_by(vibr_sample_id, target, pcr_plate_id) |> 
+  summarize(
+    n_replicates_per_target = n(),
+    .groups = "drop"
+    ) |> 
+  group_by(vibr_sample_id) |> 
+  mutate(n_plates = pcr_plate_id |> unique() |> length()) |> 
+  ungroup() |> 
+  arrange(vibr_sample_id, target, pcr_plate_id)
+  
+```
+
+```{r}
+#| fig-width: 10
+#| fig-height: 6
+
+tmp |> 
+  filter(n_plates > 1) |> 
+  ggplot() +
+  aes(x = target, y = pcr_plate_id |> fct_rev(), fill = pcr_plate_id) +
+  facet_grid(vibr_sample_id ~ ., scales = "free", space = "free") +
+  geom_tile(color = "white") +
+  geom_text(aes(label = n_replicates_per_target), col = "black") +
+  ylab("qPCR plate name") +
+  scale_fill_brewer("qPCR plate", type = "qual", palette = 7) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+  
+```
+
+
+All samples that had more than 3 replicates had exactly 6 replicates, split in two plates with 3 replicates per plate, and the 2nd plate what plate 8.
+
+So, we assume that these samples may correspond to samples who failed QC in their first run and got selected for another qPCR round.
+
+We'll flag them so that we can check their QC values later.
+
+```{r}
+
+qpcr <- 
+  qpcr |> 
+  select(-any_of(c("n_plates", "qpcr_redo"))) |> 
+  left_join(
+    tmp |> 
+      select(vibr_sample_id, target, pcr_plate_id, n_plates) |> 
+      mutate(qpcr_redo = n_plates > 1),
+    by = join_by(pcr_plate_id, target, vibr_sample_id)
+  ) 
+
+```
 
 
 ### Sample types and unique sample IDs
 
+In this section, we define a `qpcr_sample_type` variable to define the type of sample (Standard, Water, Negative Controls, Clinical sample, etc.) that was placed in each well, and a `qpcr_sample_id` variable to define unique sample IDs that is valid across sample types. 
 
-We define a `qpcr_sample_type` variable to summarize information from `vibr_sample_id` and `sample` columns.
-We harmonized standard names between 16S and LBP : 
+#### Standards
+
+First, we harmonized standard sample names since the 16S and LBP strain plates use different notations: 
 
 -   `content` take value from "Std-01" to "Std-07" for the 16S (where the number correspond to the number of replicates) and "Std" for LBP. 
 -   `sample` take vale from "std 10^1" (when content == Std-07) to "std 10^7" (when content == Std-01) for 16S and "Standard 1" to "Standard 6" for LBP.
@@ -299,36 +473,81 @@ We harmonized standard names between 16S and LBP :
 We harmonized `content` to "Std" and `sample` to "Standard". 
 
 ```{r}
+
 # est ce que je garde les numero pour les standard LBP ? 
 qpcr <-  
   qpcr |> 
   mutate(
-    content = 
+    content_new = 
       case_when(
-      str_detect(content, regex("^\\s*Std\\s*-\\s*0?[1-7]\\s*$", ignore_case = TRUE)) ~ "Std",
-      #str_detect(sample,  regex("^\\s*standard\\s*[1-6]\\s*$",    ignore_case = TRUE)) ~ "Standard",
-      TRUE ~ content
-    ), 
-    sample =  
-      case_when(
-      str_detect(sample,  regex("^\\s*std\\s*10\\^\\s*[1-7]\\s*$", ignore_case = TRUE)) ~ "Standard", 
-      TRUE ~ sample), 
+        (target != "16S") & str_detect(content, "Std") ~ content,
+        (target == "16S") & str_detect(content, "Std") ~ str_c("Std-0", sample |> parse_number()),
+        TRUE ~ content
+      )# , 
+    # sample =  
+    #   case_when(
+    #   str_detect(sample,  regex("^\\s*std\\s*10\\^\\s*[1-7]\\s*$", ignore_case = TRUE)) ~ "Standard", 
+    #   TRUE ~ sample)
+  )
+
+qpcr |> 
+  filter(str_detect(content, "Std")) |> 
+  dplyr::count(content, content_new, starting_quantity) 
+
+qpcr$content <- qpcr$content_new
+qpcr <- qpcr |> select(-content_new)
+
+```
+
+
+
+
+#### Sample type
+
+We now define the `qpcr_sample_type` variable, which is constructed from the information of the `vibr_sample_id` and `sample` columns.
+
+
+```{r}
+
+qpcr |> 
+  dplyr::count(
+    is.na(vibr_sample_id), 
+    str_detect(content, "Std"), 
+    str_detect(sample, "water"), 
+    str_detect(content, "NTC"), 
+    str_detect(vibr_sample_id, "EQ"), 
+    str_detect(vibr_sample_id, "empty"), 
+    is.na(replicate), 
+    name = "n_wells"
+  )
+
+```
+
+
+
+```{r}
+
+qpcr <-  
+  qpcr |> 
+  mutate(
     qpcr_sample_type = 
       case_when(
         is.na(vibr_sample_id) & str_detect(content, "Std") ~ "Standard",
         is.na(vibr_sample_id) & str_detect(sample, "water") ~ "Water",
         is.na(vibr_sample_id) & str_detect(content, "NTC") ~ "NTC (No template control)",
-        str_detect(vibr_sample_id, "EQ") ~ "Control sample", # does not exist in this data
-        str_detect(vibr_sample_id, "empty") ~ "Empty", # does not exist in this data
-        str_detect(content, "Unkn") & is.na(replicate) & is.na(vibr_sample_id) ~ "Likely empty",
-        is.na(vibr_sample_id) ~ "Water or empty", # ????
-        TRUE ~ "VIBRANT clinical sample"
+        # str_detect(vibr_sample_id, "EQ") ~ "Control sample", # does not exist in this data
+        # str_detect(vibr_sample_id, "empty") ~ "Empty", # does not exist in this data
+        is.na(vibr_sample_id) & is.na(ext_lib_plate_id) ~ "Unclear ???",
+        (is.na(vibr_sample_id) & !is.na(ext_lib_plate_id)) ~ "Water or empty",
+        !is.na(vibr_sample_id) ~ "VIBRANT clinical sample",
+        TRUE ~ "???"
       )
   )
-
-# 
-
+    
 ```
+
+
+
 
 ```{r}
 # qpcr |> dplyr::filter(target == "16S") |> arrange(qpcr_sample_type) |> View()
@@ -342,84 +561,7 @@ qpcr |> dplyr::count(qpcr_sample_type, name = "n_wells") |> arrange(-n_wells) |>
 ```
 
 
-```{r}
-
-tmp <- 
-  qpcr |> 
-  dplyr::filter(qpcr_sample_type == "VIBRANT clinical sample", target == target[1]) |>
-  group_by(vibr_sample_id) |> 
-  summarize(
-    n_replicates = n(),
-    n_plates = ext_lib_plate_nb |> unique() |> length()
-    #any_in_redos = any(in_redos)
-  )
-
-tmp |> dplyr::count(n_plates) # *Almost* all samples's replicates are on a single plate
-# TODO: check what are the samples that are on several plates
-
-tmp |> dplyr::count(n_replicates, n_plates) # All samples have at least 3 replicates
-
-```
-
-We note that almost all samples's replicates are on a single extraction plate (`ext_lib_plate_nb` or `ext_lib_plate_id`); and all samples have at least 3 replicates. A few samples are on two plates and have 6 replicates.
-
-
-```{r}
-
-tmp <- 
-  qpcr |> 
-  dplyr::filter(qpcr_sample_type == "VIBRANT clinical sample", target == "16S") |>
-  group_by(vibr_sample_id) |> 
-  summarize(
-    n_replicates = n(),
-    n_plates = ext_lib_plate_nb |> unique() |> length()
-  )
-
-tmp |> dplyr::count(n_plates) # All samples's replicates are on a single plate
-
-tmp |> dplyr::count(n_replicates) # All samples have 3 replicates
-
-```
-
-
-```{r}
-#| eval: false
-
-tmp |> 
-  dplyr::filter(n_replicates == 6) |> 
-  dplyr::left_join(qpcr |> dplyr::filter(target == "16S"), by = join_by(vibr_sample_id)) |> 
-  select(vibr_sample_id, ext_lib_plate_nb, ext_lib_position, pcr_plate_id, data_row, well, cq) |> 
-  gt()
-
-```
-
-```{r}
-#| eval: false
-
-rep_per_plate <-
-  qpcr |>
-  filter(qpcr_sample_type == "VIBRANT clinical sample") |>
-  mutate(well = str_c(well_row, well_col)) |>
-  distinct(vibr_sample_id, target, pcr_plate_id, well) |>
-  dplyr::count(vibr_sample_id, target, pcr_plate_id, name = "n_wells_plate")
-
-
-rep_per_plate |>
-  group_by(vibr_sample_id, target) |>
-  summarise(
-    n_reps_total = sum(n_wells_plate),
-    n_qpcr_plates = n_distinct(pcr_plate_id),
-    breakdown = str_c(paste0(pcr_plate_id, "=", n_wells_plate), collapse = "; "),
-    .groups = "drop"
-  ) |> 
-  filter(n_reps_total == 6) |> 
-  arrange(vibr_sample_id, target)
-
-
-```
-
-
-We'll fix that below.
+#### qPCR plate wells (coordinates for plotting plate design)
 
 
 ```{r}
@@ -433,6 +575,8 @@ qpcr <-
   relocate(well_col, well_row, .after = well)
 
 ```
+
+#### Unique qPCR sample IDs
 
 We also define a unique "qPCR sample ID" according to each sample type.
 
@@ -455,7 +599,10 @@ qpcr <-
           str_c("water_plate", 
                 ext_lib_plate_nb |> str_pad(width = 2, pad = 0)),
         (qpcr_sample_type == "Water or empty") ~ 
-          str_c("water_or_empty_plate", 
+          str_c("water_or_empty_plate_", 
+                ext_lib_plate_nb |> str_pad(width = 2, pad = 0),"_", sample),
+        (qpcr_sample_type == "Unclear ???") ~ 
+          str_c("unclear_plate_", 
                 ext_lib_plate_nb |> str_pad(width = 2, pad = 0),"_", sample),
         (qpcr_sample_type == "Standard") ~ 
           str_c("std_", content |> str_remove("Std-"), 
@@ -492,22 +639,40 @@ qpcr_sample_type_colors <- c(
   "Standard" = "gold",
   "Water" = "lightblue1",
   "Empty" = "gray",
+  "NTC (No template control)" = "gray50",
+  "Unclear ???" = "red",
   "Water or empty" = "gray80"
 )
 
 qpcr |> 
   dplyr::filter(target != "16S", ext_lib_plate_nb <= 12) |> 
-  select(ext_lib_plate_nb, well_col, well_row, qpcr_sample_type, sample) |>
+  select(pcr_plate_id, ext_lib_plate_nb, target, well_col, well_row, qpcr_sample_type, sample) |>
   distinct() |>
   ggplot() +
   aes(x =  well_row |> factor(), y = well_col |> factor() |> fct_rev(), fill = qpcr_sample_type) +
-  facet_wrap(~ ext_lib_plate_nb) +
+  facet_wrap(target ~ pcr_plate_id) +
   geom_tile() +
   geom_path(aes(group = sample), col = "black", alpha = 0.5) +
   geom_point() +
   scale_fill_manual(values = qpcr_sample_type_colors) +
   xlab("Well column") + ylab("Well row") +
   labs(caption = "Black lines connect replicates") 
+
+
+qpcr |> 
+  dplyr::filter(target != "16S", ext_lib_plate_nb == 10) |> 
+  select(pcr_plate_id, ext_lib_plate_nb, strain_group_qpcr, target, well_col, well_row, qpcr_sample_type, sample) |>
+  distinct() |>
+  ggplot() +
+  aes(x =  well_row |> factor(), y = well_col |> factor() |> fct_rev(), fill = qpcr_sample_type) +
+  facet_grid(pcr_plate_id ~ strain_group_qpcr + target) +
+  geom_tile() +
+  geom_path(aes(group = sample), col = "black", alpha = 0.5) +
+  geom_point() +
+  scale_fill_manual(values = qpcr_sample_type_colors) +
+  xlab("Well column") + ylab("Well row") +
+  labs(caption = "Black lines connect replicates") 
+
 
 ```
 
