@@ -169,12 +169,25 @@ se_mg
 
 ```{r}
 
-qPCR_file <- se_files[grepl("pcr_agg", se_files)][1]
+qPCR_file <- se_files[grepl("03_se_pcr_agg", se_files)][1]
 se_qPRC <- readRDS(qPCR_file)
 se_qPRC <- check_se(se_qPRC)
 se_qPRC
 
 ```
+
+## qPCR data for daily swabs (generated post-unblinding)
+
+```{r}
+
+daily_qPCR_file <- se_files[grepl("30_se_pcr_agg", se_files)][1]
+se_daily_qPRC <- readRDS(daily_qPCR_file)
+se_daily_qPRC <- check_se(se_daily_qPRC)
+se_daily_qPRC
+
+```
+
+
 ## 16S rRNA amplicon sequencing
 
 
@@ -229,7 +242,12 @@ assay_list <-
     tibble(
       mae_assay_name = "qPCR", 
       se_object_name = "se_qPRC", 
-      assay_label = "qPCR"
+      assay_label = "qPCR weekly swabs"
+      ),
+    tibble(
+      mae_assay_name = "qPCR_daily", 
+      se_object_name = "se_daily_qPRC", 
+      assay_label = "qPCR home swabs"
       ),
     tibble(
       mae_assay_name = "amplicon", 
@@ -931,6 +949,7 @@ SE_list <-
     visit_and_sample_info = se_sample_and_visit_info_assay,
     mg = se_mg,
     qPCR = se_qPRC,
+    qPCR_daily = se_daily_qPRC,
     amplicon = se_16S,
     luminex = se_luminex,
     flow = se_flow
