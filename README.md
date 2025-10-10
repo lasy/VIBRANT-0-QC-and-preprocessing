@@ -12,5 +12,4 @@ from the different biological assays (metagenomics, 16S amplicon sequencing, lum
 There is one (or a few) quarto documents (`.qmd`) per modality. 
 While most are standalone, it is recommended to execute them in the order they are numbered.
 
-In development, these documents read "raw tabular data" from the VIBRANT dropbox (or UCLouvain secure One-Drive). 
-Once all data is generated, QCed, and locked, data will be stored on a Zenodo repository and path will be modified accordingly.
+In development, these documents read "raw tabular data" from the VIBRANT secure dropbox (or UCLouvain secure One-Drive) and export the processed data on secure shared drives.
