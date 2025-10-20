@@ -37,6 +37,10 @@ rm(tmp)
 theme_set(theme_light())
 ```
 
+
+The primary purpose of this document is to define and create additional assays to the `MultiAssayExperiment` object that contain the primary and secondary outcomes of the VIBRANT trial.
+
+
 # Loading the `MultiAssayExperiment` object
 
 ```{r}
@@ -805,7 +809,7 @@ mae <- c(
 
 # Saving the `MultiAssayExperiment` objects
 
-We save the "master" MAE (with all assays); but if needed for publication, we can subset the MAE to only include the assays/data of interest.
+We save the MAE for downstream analyses.
 
 ```{r}
 

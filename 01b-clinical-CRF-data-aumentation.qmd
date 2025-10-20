@@ -10,7 +10,7 @@ format:
     theme: journal
     embed-resources: true
 execute:
-  cache: true # refresh true false
+  cache: refresh # refresh true false
 project:
   execute-dir: project
 editor: 
@@ -40,9 +40,9 @@ theme_set(theme_bw())
 
 The purpose of this document is to create
 
-- a `participants` table with critical participant-invariant information (arm, site, etc.), including the population flags along with a 
+- a `participants` table with study-level participant-invariant information (arm, site, etc.), including the population flags along with a 
 
-  + `participants_variable_dictionary`
+  + `participants_variable_dictionary` which provides a description for each of the columns in the `participants` table
 
 - a `visits_long` table with the `visit_code` and `study_day` for each participant and each CRFs. This table is used to identify residual discrepancies between CRFs in `visit_code` and `study_day` (and harmonize them if needed).
 
@@ -134,10 +134,18 @@ participants <-
 
 ```
 
-## Randomization (`randomized` and `arm`)
+## Randomization (`randomized` and `treatment_code`)
 
-Randomization data is available in CRF13. Randomized participants are participants with a `treatment_code`.
+Randomization data is available in CRF13. 
 
+
+:::callout-note
+Since data QC happened before unblinding, we do not know the study arm of participants at this stage. The only open (non-blinded) arm was the "LC-106-o" arm in which participants received the LBP before they completed their MTZ treatment. Participants in that arm are identified with the column `group4` since that arm was the fourth arm of the trial. 
+
+Unblinding happened on June 17, 2025, after the `MultiAssayExperiment` object was created, and arms were added to the `MultiAssayExperiment` object in the script `92-unblinding.qmd`.
+:::
+
+Here, we simply flag if participants were randomized or not (i.e., whether they had a `treatment_code`), if they were part of the overal arm (LC-106-o arm - `group4`), and we create a placeholder `arm` column that will be updated after unblinding.
 
 ```{r}
 #| eval: false
@@ -189,7 +197,7 @@ participants <-
 
 participants |> 
   dplyr::count(site, randomized, arm) |> 
-  gt("Number of randomized participants per site and per arm")
+  gt(caption = "Number of randomized participants per site and per arm")
 
 ```
 
@@ -619,6 +627,8 @@ write_csv(
   )
 
 ```
+
+These flags were checked with Lara Lewis (CAPRISA statistician) and validated.
 
 
 
@@ -1097,6 +1107,8 @@ visits_variable_dictionary |> gt()
 
 
 # Exports
+
+We export the `participants`, `visits_long`, and `visits` tables along with their variable dictionaries.
 
 ```{r}
 

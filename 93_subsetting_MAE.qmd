@@ -57,13 +57,14 @@ rm(tmp)
 :::callout-note
 The purpose of this document is to subset the master `MAE` object into smaller, analysis-specific `MAE` objects that contain only the data required for the respective analyses.  
 
-These curated `MAE` objects are intended for public release, and therefore do not include sensitive or unnecessary information.
+These curated `MAE` objects are ultimately intended for public release, and therefore should not include sensitive or unnecessary information.
 
 At the end of this document, several `MAE` objects are created:
 
-- `MAE_1`: contains all necessary data for the first VIBRANT paper 1 (primary outcome) [cite paper].  
-- `MAE_2`: contains all necessary data for [describe analysis or paper].  
+- `MAE_1`: contains all necessary data for the first VIBRANT paper describing the trial results (primary and secondary outcomes) - see [Potloane et al., 2025](https://www.medrxiv.org/content/10.1101/2025.09.18.25336053v3).  
+- `MAE_2`: contains all necessary data for the second VIBRANT paper describing in more details the dynamics of the microbiota and of colonization following metronidazole treatment and LBP intervention.  
 - ...
+
 :::
 
 
@@ -220,8 +221,18 @@ mae_3@metadata <- mae_3@metadata[c("study","data_source", "data_status","date","
 
 ## MAE 4 (predictors)
 
+> TODO
+
+
+## MAE 5 (Acceptability - qualitative and quantitative study)
+
+> TODO
+
+
 ## MAE 6 (BV diagnosis)
 
+
+`mae_6` contains all necessary information and data for the "BV diagnosis" paper led by Meilin Zhu which aims at comparing BV diagnosis frameworks (Amsel criteria, Nugent scores, and molecular composition) across sites.
 
 ```{r}
 
@@ -241,9 +252,9 @@ mae_6@metadata$crf_data_clean <- mae_6@metadata$crf_data_clean[crf_list]
 ```
 
 
-
-
 ## Save MAEs 
+
+We export the subsetted `MAE` to disk as `.rds` files.
 
 ```{r}
 
