@@ -189,7 +189,7 @@ participants <-
 
 participants |> 
   dplyr::count(site, randomized, arm) |> 
-  gt("Number of randomized participants per site and per arm")
+  gt(caption = "Number of randomized participants per site and per arm")
 
 ```
 

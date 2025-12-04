@@ -341,7 +341,7 @@ mae_coldata_assays |> str()
 
 mae_coldata_assays |> 
   dplyr::count(sample_type, control_type) |> 
-  gt("Number of samples per sample type and control type") 
+  gt(caption = "Number of samples per sample type and control type") 
   
 ```
 
