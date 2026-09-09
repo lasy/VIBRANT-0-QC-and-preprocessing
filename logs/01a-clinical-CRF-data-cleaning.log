@@ -1,0 +1,38 @@
+[31m
+
+processing file: 01a-clinical-CRF-data-cleaning.qmd
+[39m1/831                    
+2/831 [setup]            
+3/831                    
+4/831 [unnamed-chunk-1]  
+5/831                    
+6/831 [unnamed-chunk-2]  
+7/831                    
+8/831 [unnamed-chunk-3]  
+9/831                    
+10/831 [unnamed-chunk-4]  
+11/831                    
+12/831 [unnamed-chunk-5]  
+13/831                    
+14/831 [unnamed-chunk-6]  
+15/831                    
+16/831 [unnamed-chunk-7]  
+17/831                    
+18/831 [unnamed-chunk-8]  
+19/831                    
+20/831 [unnamed-chunk-9]  
+21/831                    
+22/831 [unnamed-chunk-10] 
+23/831                    
+24/831 [unnamed-chunk-11] 
+[31mError:
+! object 'site_colors' not found
+Backtrace:
+    ▆
+ 1. └─ggplot2::scale_color_manual("Study site", values = site_colors)
+ 2.   └─ggplot2:::manual_scale(aesthetics, values, breaks, ..., na.value = na.value)
+ 3.     └─rlang::is_missing(values)
+[39m[31m
+Quitting from 01a-clinical-CRF-data-cleaning.qmd:209-237 [unnamed-chunk-11]
+[39m[31mExecution halted
+[39m[33mWARN: Error encountered when rendering files[39m

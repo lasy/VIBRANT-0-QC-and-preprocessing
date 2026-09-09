@@ -1,0 +1,20 @@
+name: snakemake
+channels: 
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  - snakemake
+  - quarto
+  - r-base
+  - r-dplyr
+  - r-ggplot2
+  - r-tidyr
+  - r-tidyverse
+  - r-stringr
+  - r-codetools 
+  - r-fs
+  - r-rlang
+  - r-rmarkdown
+  - r-knitr
+  - r-gt

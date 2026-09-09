@@ -7,7 +7,25 @@ get_clinical_data_dir <- function() {
     data_dir <- "/Users/laurasymul/OneDrive - UCL/Academia/Research/VIBRANT clinical data UCLouvain/"
   } else if (str_detect(getwd(), "/laura/")) {
     data_dir <- "/Users/laura/OneDrive - UCL/11-VIBRANT/VIBRANT clinical data UCLouvain/"
-  } else {
+  } else if (str_detect(getwd(), "/elibertrand/")) {
+    
+    sysname <- Sys.info()[["sysname"]]
+    
+    if (sysname == "Linux"){
+      
+      data_dir <- "/mnt/c/Users/elibertrand/OneDrive - UCL/Documents/Projets/VIBRANT/Fichiers de Laura Symul - VIBRANT clinical data UCLouvain - Copie/"
+    }
+    
+    else if (sysname == "Windows"){
+      data_dir <- "C:/Users/elibertrand/OneDrive - UCL/Documents/Projets/VIBRANT/Fichiers de Laura Symul - VIBRANT clinical data UCLouvain - Copie/"
+    }
+    
+    else {
+      stop(str_c("Unrecognized OS '", sysname, "' for user path containing 'elibertrand'.\n"))
+    }
+    
+  }
+  else {
     stop(
       str_c(
         "You need to specify the path to the data directory in `R/get_data_dir.R`.\n",
@@ -34,7 +52,23 @@ get_uclouvain_data_dir <- function() {
     data_dir <- "/Users/laurasymul/OneDrive - UCL/Academia/Research/VIBRANT data UCLouvain/"
   } else if (str_detect(getwd(), "/laura/")) {
     data_dir <- "/Users/laura/OneDrive - UCL/VIBRANT data UCLouvain/"
-  } else {
+  } else if (str_detect(getwd(), "/elibertrand/")) {
+    
+    if (sysname == "Linux"){
+      
+      data_dir <- "/mnt/c/Users/elibertrand/OneDrive - UCL/Documents/Projets/VIBRANT/Fichiers de Laura Symul - VIBRANT data UCLouvain - Copie/"
+    }
+    
+    else if (sysname == "Windows"){
+      data_dir <- "C:/Users/elibertrand/OneDrive - UCL/Documents/Projets/VIBRANT/Fichiers de Laura Symul - VIBRANT data UCLouvain - Copie/"
+    }
+    
+    else {
+      stop(str_c("Unrecognized OS '", sysname, "' for user path containing 'elibertrand'.\n"))
+    }
+    
+  }
+  else {
     stop(
       "You need to specify the path to the data directory in `R/get_data_dir.R`"
     )
